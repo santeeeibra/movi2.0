@@ -1088,6 +1088,12 @@ function sincronizarCapaAutoConductor() {
   const telefono = viajeActivoPasajero?.conductor_telefono;
   const activo = Boolean(telefono) && ESTADOS_VIAJE_CON_AUTO_VISIBLE.includes(viajeActivoPasajero.estado);
 
+  console.log('[Movi][debug-auto] sincronizarCapaAutoConductor:', {
+    telefono,
+    estado: viajeActivoPasajero?.estado,
+    activo,
+  });
+
   if (activo) {
     iniciarSeguimientoPosicionConductor(telefono);
   } else {
@@ -1220,7 +1226,12 @@ function animarAutoHacia(latDestino, lngDestino, headingDestino) {
 }
 
 function aplicarNuevaPosicionConductor(fix) {
-  if (!fix || fix.lat == null || fix.lng == null) return;
+  if (!fix || fix.lat == null || fix.lng == null) {
+    console.log('[Movi][debug-auto] aplicarNuevaPosicionConductor recibió un fix vacío/nulo:', fix);
+    return;
+  }
+
+  console.log('[Movi][debug-auto] Nueva posición recibida:', fix, '| ruta cargada:', Boolean(rutaGeometriaActual), '| capa auto-conductor existe:', Boolean(map.getSource('auto-conductor')));
 
   const proyeccion = rutaGeometriaActual
     ? proyectarEnRuta(fix.lat, fix.lng, rutaGeometriaActual)
@@ -1245,7 +1256,12 @@ function aplicarNuevaPosicionConductor(fix) {
 }
 
 function iniciarSeguimientoPosicionConductor(telefono) {
-  if (telefonoConductorSeguido === telefono && canalPosicionConductor) return; // ya esta corriendo
+  if (telefonoConductorSeguido === telefono && canalPosicionConductor) {
+    console.log('[Movi][debug-auto] Ya se estaba siguiendo a este teléfono, no se reinicia:', telefono);
+    return;
+  }
+
+  console.log('[Movi][debug-auto] Iniciando seguimiento de posición para telefono:', telefono);
 
   detenerSeguimientoPosicionConductor(); // por si veniamos siguiendo a otro conductor
   telefonoConductorSeguido = telefono;
