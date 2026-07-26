@@ -2503,12 +2503,26 @@ async function devMoverAutoA(lat, lng) {
 }
 
 // ==================================================================
-//  2c. SIMULAR RECORRIDO AUTOMÁTICO (sin caminar de verdad con el celu)
-//  Calcula una ruta real con getRuta() y va escribiendo puntos de esa
-//  geometria, uno por uno, en la tabla "conductores" (mismo mecanismo que
-//  el click-en-el-mapa de arriba) — asi se ve el auto moviendose solo por
-//  la ruta y enganchado a la calle, sin que nadie tenga que caminar con
-//  el telefono en la mano para probarlo.
+//  2c. SIMULAR RECORRIDO AUTOMÁTICO — reconstruido de cero.
+//
+//  Version anterior (con problemas): caminaba por los puntos crudos de
+//  la geometria de la ruta a un INTERVALO DE TIEMPO fijo. El problema de
+//  fondo: Mapbox no reparte esos puntos de forma pareja — pone muchos
+//  puntos juntos en las curvas y pocos en los tramos rectos (mas largos).
+//  Visitarlos todos al mismo ritmo (cada X ms) hacia que el auto "volara"
+//  en las rectas (poca distancia entre puntos pero mismo tiempo entre
+//  ellos que en una curva) y se arrastrara en las curvas — una velocidad
+//  completamente irreal y que además variaba todo el tiempo.
+//
+//  Version nueva: se calcula la DISTANCIA REAL acumulada de toda la ruta
+//  (sumando la distancia entre cada par de puntos consecutivos), y se
+//  avanza sobre esa distancia a una VELOCIDAD CONSTANTE (metros/segundo,
+//  configurable abajo) usando requestAnimationFrame — en cada frame se
+//  calcula "cuantos metros deberiamos haber recorrido a esta velocidad
+//  desde que arrancamos" y se interpola la posicion exacta sobre el
+//  segmento de la ruta que corresponda a esa distancia. Esto da una
+//  animacion perfectamente fluida y a un ritmo realista (tipo auto de
+//  ciudad) sin importar como este repartida la geometria de la ruta.
 // ==================================================================
 const devBtnSimularOrigen = document.getElementById('dev-btn-simular-origen');
 const devBtnSimularDestino = document.getElementById('dev-btn-simular-destino');
@@ -2519,12 +2533,58 @@ const devFeedbackSimulacion = document.getElementById('dev-feedback-simulacion')
 // simular que el conductor viene acercandose desde algun lado.
 const TEST_PUNTO_PARTIDA = { lat: -40.8175, lng: -62.9955 };
 
-let devSimulacionIntervalId = null;
+const VELOCIDAD_SIMULACION_MS = 11;          // ~40 km/h, velocidad tipica de ciudad
+const INTERVALO_ESCRITURA_SUPABASE_MS = 1000; // cada cuanto avisamos a otros dispositivos reales (no hace falta a 60fps)
+
+// Distancia en metros entre dos puntos [lng,lat]. Aproximacion plana con
+// correccion de longitud por latitud (misma formula que ya usa
+// proyectarEnSegmento mas arriba) — de sobra de precision a escala de
+// una ciudad como Viedma.
+function devDistanciaMetros(a, b) {
+  const latRef = a[1] * Math.PI / 180;
+  const metrosPorGradoLng = METROS_POR_GRADO_LAT_AUTO * Math.cos(latRef);
+  const dx = (b[0] - a[0]) * metrosPorGradoLng;
+  const dy = (b[1] - a[1]) * METROS_POR_GRADO_LAT_AUTO;
+  return Math.hypot(dx, dy);
+}
+
+// Tabla de distancia acumulada: acumuladas[i] = cuantos metros hay desde
+// el inicio de la ruta hasta el punto coords[i].
+function devConstruirTablaDistancias(coords) {
+  const acumuladas = [0];
+  for (let i = 1; i < coords.length; i++) {
+    acumuladas.push(acumuladas[i - 1] + devDistanciaMetros(coords[i - 1], coords[i]));
+  }
+  return acumuladas;
+}
+
+// Dada una distancia recorrida (en metros desde el inicio), encuentra en
+// que segmento de la ruta cae y devuelve la posicion exacta interpolada
+// (mas el rumbo de ese segmento, para la rotacion del icono).
+function devPuntoEnDistancia(coords, acumuladas, distancia) {
+  let i = 1;
+  while (i < acumuladas.length && acumuladas[i] < distancia) i++;
+  if (i >= acumuladas.length) i = acumuladas.length - 1;
+
+  const inicioSegmento = acumuladas[i - 1];
+  const largoSegmento = acumuladas[i] - inicioSegmento || 1;
+  const t = Math.max(0, Math.min(1, (distancia - inicioSegmento) / largoSegmento));
+
+  const a = coords[i - 1];
+  const b = coords[i];
+  const lng = a[0] + (b[0] - a[0]) * t;
+  const lat = a[1] + (b[1] - a[1]) * t;
+  const heading = calcularRumbo({ lat: a[1], lng: a[0] }, { lat: b[1], lng: b[0] });
+
+  return { lat, lng, heading };
+}
+
+let devSimulacionFrameId = null;
 
 function devDetenerSimulacion(mensaje) {
-  if (devSimulacionIntervalId) {
-    clearInterval(devSimulacionIntervalId);
-    devSimulacionIntervalId = null;
+  if (devSimulacionFrameId !== null) {
+    cancelAnimationFrame(devSimulacionFrameId);
+    devSimulacionFrameId = null;
   }
   if (mensaje) devMostrarFeedback(devFeedbackSimulacion, mensaje);
 }
@@ -2548,31 +2608,59 @@ async function devSimularRecorrido(puntos, textoOk) {
   window._iniciarAnimacionGlow?.();
 
   const coords = ruta.geometry.coordinates; // [[lng,lat], ...]
+  const acumuladas = devConstruirTablaDistancias(coords);
+  const distanciaTotal = acumuladas[acumuladas.length - 1];
 
-  // FIX: antes se salteaban puntos (cada ~35avo del total) para no mandar
-  // demasiadas escrituras a Supabase, pero eso hacia que la animacion
-  // conectara puntos lejanos con una linea recta — en las curvas/esquinas
-  // esto corta camino en diagonal en vez de seguir el trazado real de la
-  // calle, dando la sensacion de que el auto "flota" o va directo al
-  // destino ignorando las calles. Ahora se recorren TODOS los puntos de
-  // la geometria real (o de a 2 si la ruta es muy larga, para no pasarnos
-  // de unos ~150 pasos), a un intervalo mas corto, asi cada tramo entre
-  // un punto y el siguiente es tan chico que calca la curva real de la
-  // calle en vez de "cortar" por el medio.
-  const salto = coords.length > 150 ? Math.ceil(coords.length / 150) : 1;
-  let i = 0;
+  const telefono = viajeActivoPasajero?.conductor_telefono
+    || devViajeActivo?.conductor_telefono
+    || TELEFONO_CONDUCTOR_PRUEBA;
 
-  devMostrarFeedback(devFeedbackSimulacion, 'Simulando... 🚗');
+  const segundosEstimados = Math.round(distanciaTotal / VELOCIDAD_SIMULACION_MS);
+  devMostrarFeedback(devFeedbackSimulacion, `Simulando... 🚗 (${(distanciaTotal / 1000).toFixed(2)} km, ~${segundosEstimados}s)`);
 
-  devSimulacionIntervalId = setInterval(async () => {
-    if (i >= coords.length) {
+  const inicio = performance.now();
+  let ultimaEscritura = 0;
+
+  function escribirEnSupabase(punto) {
+    supabase
+      .from('conductores')
+      .update({ lat: punto.lat, lng: punto.lng, heading: punto.heading, actualizado_en: new Date().toISOString() })
+      .eq('telefono', telefono)
+      .then(({ error }) => {
+        if (error) console.error('[Dev] Error escribiendo posición simulada:', error);
+      });
+  }
+
+  function frame(ahora) {
+    const segundosTranscurridos = (ahora - inicio) / 1000;
+    const distanciaRecorrida = VELOCIDAD_SIMULACION_MS * segundosTranscurridos;
+
+    if (distanciaRecorrida >= distanciaTotal) {
+      const final = devPuntoEnDistancia(coords, acumuladas, distanciaTotal);
+      pintarAutoEnMapa(final.lat, final.lng, final.heading);
+      posicionAutoMostrada = final;
+      escribirEnSupabase(final);
       devDetenerSimulacion(textoOk);
       return;
     }
-    const [lng, lat] = coords[i];
-    await devMoverAutoA(lat, lng);
-    i += salto;
-  }, 350); // intervalo corto para que la animacion no llegue a "cortar camino"
+
+    const punto = devPuntoEnDistancia(coords, acumuladas, distanciaRecorrida);
+    // Pintado directo, sin pasar por animarAutoHacia: como ya calculamos
+    // una posicion nueva y precisa en cada frame (~60 veces por segundo),
+    // no hace falta ninguna suavizacion extra encima — esa suavizacion es
+    // para el caso de GPS real, que llega mucho mas espaciado.
+    pintarAutoEnMapa(punto.lat, punto.lng, punto.heading);
+    posicionAutoMostrada = punto;
+
+    if (ahora - ultimaEscritura > INTERVALO_ESCRITURA_SUPABASE_MS) {
+      ultimaEscritura = ahora;
+      escribirEnSupabase(punto);
+    }
+
+    devSimulacionFrameId = requestAnimationFrame(frame);
+  }
+
+  devSimulacionFrameId = requestAnimationFrame(frame);
 }
 
 devBtnSimularOrigen.addEventListener('click', () => {
