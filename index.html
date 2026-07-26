@@ -264,6 +264,9 @@
 
   <div class="login-overlay" id="login-overlay">
     <div class="login-sheet">
+      <button class="login-back-btn" id="btn-atras-login" aria-label="Volver">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+      </button>
       <div class="login-logo">M</div>
       <div class="login-title">Bienvenido a Movi</div>
       <div class="login-subtitle">Ingresá tus datos para empezar</div>
@@ -315,6 +318,9 @@
   <!-- ================================================================ -->
   <div class="login-overlay" id="conductor-form-overlay">
     <div class="login-sheet">
+      <button class="login-back-btn" id="btn-atras-conductor" aria-label="Volver">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+      </button>
       <div class="login-logo">M</div>
       <div class="login-title">Registro Conductor</div>
       <div class="login-subtitle">Completá tus datos para empezar</div>
@@ -357,10 +363,54 @@
   <!--  Driver waiting screen (after conductor registers / reconnects)  -->
   <!-- ================================================================ -->
   <div class="login-overlay" id="driver-waiting-overlay">
-    <div class="login-sheet" style="text-align:center;">
-      <div class="login-logo">M</div>
-      <div class="login-title">Esperando viajes...</div>
-      <div class="spinner" style="margin:30px auto 10px;"></div>
+    <div class="login-sheet driver-home-sheet">
+      <div class="driver-home-header">
+        <div class="login-logo" style="margin:0;">M</div>
+        <div class="driver-disponible-toggle">
+          <span class="driver-disponible-label" id="driver-disponible-label">No disponible</span>
+          <button class="toggle-switch" id="toggle-disponible" role="switch" aria-checked="false" aria-label="Disponible para viajes">
+            <span class="toggle-switch-knob"></span>
+          </button>
+        </div>
+      </div>
+
+      <div class="driver-pending-empty" id="driver-pending-empty">
+        <div class="spinner" style="margin:20px auto 12px;"></div>
+        <div class="driver-pending-empty-texto">Activá tu disponibilidad para empezar a recibir viajes</div>
+      </div>
+
+      <div class="driver-pending-list" id="driver-pending-list"></div>
+    </div>
+  </div>
+
+  <!-- ================================================================ -->
+  <!--  Vista del conductor durante un viaje activo (aceptado -> fin)   -->
+  <!-- ================================================================ -->
+  <div class="driver-active-sheet" id="driver-active-sheet" style="display:none;">
+    <div class="sheet-handle-zone"><div class="sheet-handle"></div></div>
+    <div class="sheet-title" id="driver-active-titulo">Yendo a buscar al pasajero</div>
+
+    <div class="driver-active-info" id="driver-active-info"></div>
+
+    <button class="cta" id="btn-conductor-llegue">Llegué</button>
+    <button class="cta" id="btn-conductor-iniciar" style="display:none;">Iniciar viaje</button>
+    <button class="cta" id="btn-conductor-finalizar" style="display:none;">Finalizar viaje</button>
+  </div>
+
+  <!-- ================================================================ -->
+  <!--  Historial de viajes (pasajero y conductor)                      -->
+  <!-- ================================================================ -->
+  <div class="paradas-overlay" id="historial-overlay">
+    <div class="paradas-panel">
+      <div class="paradas-panel-header">
+        <div class="paradas-panel-title">Historial de viajes</div>
+        <button class="icon-btn drawer-close" id="btn-cerrar-historial" aria-label="Cerrar">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        </button>
+      </div>
+      <div class="paradas-panel-list" id="historial-lista">
+        <div class="result-empty">Cargando...</div>
+      </div>
     </div>
   </div>
 

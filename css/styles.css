@@ -1178,3 +1178,161 @@ body {
   max-height: 120px;
   overflow-y: auto;
 }
+
+/* ================================================================ */
+/*  FASE 0 — Boton "Atras" en login de pasajero / conductor         */
+/* ================================================================ */
+.login-back-btn {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(20, 23, 26, 0.06);
+  color: var(--negro);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+.login-back-btn:hover { background: rgba(20, 23, 26, 0.12); }
+.login-back-btn svg { width: 18px; height: 18px; }
+
+/* ================================================================ */
+/*  FASE 1 — Disponibilidad del conductor (toggle)                  */
+/* ================================================================ */
+.driver-home-sheet { text-align: left; max-height: 78vh; }
+.driver-home-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 18px;
+}
+.driver-disponible-toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.driver-disponible-label {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--texto-muted);
+}
+.toggle-switch {
+  position: relative;
+  width: 46px;
+  height: 26px;
+  border-radius: 100px;
+  border: none;
+  background: rgba(20, 23, 26, 0.18);
+  cursor: pointer;
+  transition: background 0.2s ease;
+  flex-shrink: 0;
+}
+.toggle-switch[aria-checked="true"] { background: var(--verde); }
+.toggle-switch-knob {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.25);
+  transition: transform 0.2s ease;
+}
+.toggle-switch[aria-checked="true"] .toggle-switch-knob {
+  transform: translateX(20px);
+}
+
+.driver-pending-empty {
+  text-align: center;
+  padding: 10px 10px 4px;
+}
+.driver-pending-empty-texto {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--texto-muted);
+  line-height: 1.4;
+}
+
+/* ================================================================ */
+/*  FASE 2/3 — Lista de viajes pendientes para aceptar              */
+/* ================================================================ */
+.driver-pending-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.driver-pending-card {
+  border: 1.5px solid rgba(20, 23, 26, 0.08);
+  border-radius: 18px;
+  padding: 14px;
+  background: rgba(255, 255, 255, 0.6);
+}
+.driver-pending-ruta {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--negro);
+  line-height: 1.45;
+  margin-bottom: 6px;
+}
+.driver-pending-ruta .punto { color: var(--texto-muted); font-weight: 600; }
+.driver-pending-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+}
+.driver-pending-precio {
+  font-size: 16px;
+  font-weight: 800;
+  color: var(--verde-fuerte);
+}
+.driver-pending-tiempo {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--texto-muted);
+}
+.driver-pending-aceptar {
+  width: 100%;
+  padding: 12px;
+  border: none;
+  border-radius: 14px;
+  background: var(--verde);
+  color: #fff;
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 800;
+  cursor: pointer;
+}
+.driver-pending-aceptar:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* ================================================================ */
+/*  FASE 4 — Vista del conductor durante el viaje activo            */
+/* ================================================================ */
+.driver-active-sheet {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: var(--z-sheet);
+  border-radius: 28px 28px 0 0;
+  padding: 8px 20px max(20px, env(safe-area-inset-bottom));
+  background: rgba(255, 255, 255, 0.94);
+  backdrop-filter: blur(32px) saturate(190%);
+  -webkit-backdrop-filter: blur(32px) saturate(190%);
+  box-shadow: 0 -10px 40px rgba(20, 23, 26, 0.14);
+}
+.driver-active-info {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--texto-muted);
+  line-height: 1.5;
+  margin: 4px 0 16px;
+}
+.driver-active-info strong { color: var(--negro); }
+#driver-active-sheet .cta { margin-bottom: 10px; }
+#driver-active-sheet .cta:last-child { margin-bottom: 0; }

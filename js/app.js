@@ -60,11 +60,27 @@ let modoBusqueda = null;
 // completa/actualiza en el flujo de "Pedir viaje" mas abajo.
 let viajeActivoPasajero = null;
 
-// Posicion actual del auto del conductor en movimiento. Todavia no existe
-// una fuente real para esto (se arma en el paso del auto animado sobre la
-// ruta); queda en null hasta entonces y btn-centrar-mapa cae al origen
-// como fallback mientras tanto.
+// Posicion actual (ya interpolada/enganchada a la calle) del auto del
+// conductor en movimiento. La alimenta aplicarNuevaPosicionConductor().
 let posicionConductor = null;
+
+// Geometria (array de [lng,lat]) de la ultima ruta dibujada en el mapa.
+// Se usa para "enganchar" el icono del auto a la calle en vez de mostrarlo
+// flotando en el punto crudo del GPS (que puede caer en una vereda, un
+// techo, etc. por el margen de error normal del GPS).
+let rutaGeometriaActual = null;
+
+// Estado de sesion del conductor (Fases 1-5). Se declaran aca arriba, no
+// junto al resto de esa logica mas abajo, porque iniciarSupervisionViajeConductor()
+// se llama de forma sincronica durante la carga inicial de la pagina (ver
+// "Inicial: decidir que mostrar" un poco mas abajo) y necesita asignar
+// conductorTelefonoActual ya mismo — si estas variables estuvieran
+// declaradas con let/const mas abajo en el archivo, esa asignacion
+// fallaria con un error de "variable no inicializada" (temporal dead zone).
+let conductorTelefonoActual = null;   // telefono del conductor logueado en esta sesion
+let conductorDisponible = false;      // espejo local de conductores.disponible
+let conductorViajeActivo = null;      // viaje en curso de este conductor (o null)
+let canalPendientesConductor = null;  // suscripcion Realtime a viajes pendientes
 
 // ==================================================================
 //  Login rapido sin contraseña (localStorage + Supabase usuarios)
@@ -498,23 +514,390 @@ function detenerTrackingConductor() {
   ultimoEnvioGpsConductor = 0;
 }
 
+// ==================================================================
+//  FASES 1-5 — Disponibilidad, lista de pendientes, aceptar viaje,
+//  vista de viaje activo, y vuelta a disponible al terminar.
+// ==================================================================
+const toggleDisponible = document.getElementById('toggle-disponible');
+const driverDisponibleLabel = document.getElementById('driver-disponible-label');
+const driverPendingEmpty = document.getElementById('driver-pending-empty');
+const driverPendingList = document.getElementById('driver-pending-list');
+
+const driverActiveSheet = document.getElementById('driver-active-sheet');
+const driverActiveTitulo = document.getElementById('driver-active-titulo');
+const driverActiveInfo = document.getElementById('driver-active-info');
+const btnConductorLlegue = document.getElementById('btn-conductor-llegue');
+const btnConductorIniciar = document.getElementById('btn-conductor-iniciar');
+const btnConductorFinalizar = document.getElementById('btn-conductor-finalizar');
+
+function actualizarToggleUI() {
+  toggleDisponible.setAttribute('aria-checked', String(conductorDisponible));
+  driverDisponibleLabel.textContent = conductorDisponible ? 'Disponible' : 'No disponible';
+  driverPendingEmpty.style.display = conductorDisponible ? 'none' : 'block';
+  driverPendingList.style.display = conductorDisponible ? 'flex' : 'none';
+}
+
+// ---- FASE 2: lista de viajes pendientes (realtime) ----
+async function refrescarListaPendientes() {
+  const { data: viajesPendientes, error } = await supabase
+    .from('viajes')
+    .select('*')
+    .eq('estado', 'pendiente')
+    .is('conductor_telefono', null)
+    .order('creado_en', { ascending: false });
+
+  if (error) {
+    console.error('[Movi] Error trayendo viajes pendientes:', error);
+    return;
+  }
+
+  // TODO (mejora futura): filtrar por cercania real al conductor en vez de
+  // traer todos los pendientes de la ciudad entera.
+  let paradasPorViaje = {};
+  if (viajesPendientes.length > 0) {
+    const ids = viajesPendientes.map((v) => v.id);
+    const { data: paradasData } = await supabase
+      .from('paradas')
+      .select('*')
+      .in('viaje_id', ids)
+      .order('orden', { ascending: true });
+    (paradasData || []).forEach((p) => {
+      if (!paradasPorViaje[p.viaje_id]) paradasPorViaje[p.viaje_id] = [];
+      paradasPorViaje[p.viaje_id].push(p);
+    });
+  }
+
+  renderListaPendientes(viajesPendientes, paradasPorViaje);
+}
+
+function textoHaceCuanto(fechaISO) {
+  const minutos = Math.max(0, Math.round((Date.now() - new Date(fechaISO).getTime()) / 60000));
+  if (minutos < 1) return 'recién';
+  if (minutos === 1) return 'hace 1 min';
+  return `hace ${minutos} min`;
+}
+
+function renderListaPendientes(viajes, paradasPorViaje) {
+  if (!conductorDisponible) return; // no pintamos nada si esta en "no disponible"
+
+  if (viajes.length === 0) {
+    driverPendingList.innerHTML = '<div class="result-empty">No hay viajes pendientes por ahora</div>';
+    return;
+  }
+
+  driverPendingList.innerHTML = viajes.map((v) => {
+    const paradasViaje = paradasPorViaje[v.id] || [];
+    const destinoTexto = paradasViaje.length === 0
+      ? (v.destino_direccion || 'Destino sin especificar')
+      : paradasViaje.length === 1
+        ? (paradasViaje[0].direccion || 'Destino')
+        : `${paradasViaje.length} paradas`;
+    const origenTexto = v.origen_direccion || 'Origen sin especificar';
+    const precioTexto = v.precio ? `$ ${Number(v.precio).toLocaleString('es-AR')}` : '$ —';
+
+    return `
+      <div class="driver-pending-card" data-id="${v.id}">
+        <div class="driver-pending-ruta">
+          <span class="punto">Desde:</span> ${origenTexto}<br>
+          <span class="punto">Hasta:</span> ${destinoTexto}
+        </div>
+        <div class="driver-pending-meta">
+          <span class="driver-pending-precio">${precioTexto}</span>
+          <span class="driver-pending-tiempo">${textoHaceCuanto(v.creado_en)}</span>
+        </div>
+        <button class="driver-pending-aceptar" data-id="${v.id}">Aceptar</button>
+      </div>
+    `;
+  }).join('');
+
+  driverPendingList.querySelectorAll('.driver-pending-aceptar').forEach((btn) => {
+    btn.addEventListener('click', () => aceptarViaje(btn.dataset.id, btn));
+  });
+}
+
+function iniciarListaPendientes() {
+  detenerListaPendientes();
+  refrescarListaPendientes();
+
+  canalPendientesConductor = supabase
+    .channel('conductor-viajes-pendientes')
+    .on(
+      'postgres_changes',
+      { event: '*', schema: 'public', table: 'viajes', filter: 'estado=eq.pendiente' },
+      () => refrescarListaPendientes(),
+    )
+    .subscribe();
+}
+
+function detenerListaPendientes() {
+  if (canalPendientesConductor) {
+    supabase.removeChannel(canalPendientesConductor);
+    canalPendientesConductor = null;
+  }
+}
+
+// ---- Toggle "Disponible para viajes" ----
+toggleDisponible.addEventListener('click', async () => {
+  if (!conductorTelefonoActual) return;
+
+  conductorDisponible = !conductorDisponible;
+  actualizarToggleUI();
+
+  const { error } = await supabase
+    .from('conductores')
+    .update({ disponible: conductorDisponible })
+    .eq('telefono', conductorTelefonoActual);
+
+  if (error) {
+    console.error('[Movi] Error actualizando disponibilidad:', error);
+  }
+
+  if (conductorDisponible) {
+    iniciarListaPendientes();
+  } else {
+    detenerListaPendientes();
+    driverPendingList.innerHTML = '';
+  }
+});
+
+// ---- FASE 3: aceptar un viaje (con proteccion contra doble asignacion) ----
+async function aceptarViaje(viajeId, btnEl) {
+  btnEl.disabled = true;
+  btnEl.textContent = 'Aceptando...';
+
+  const { data: conductorRow } = await supabase
+    .from('conductores')
+    .select('*')
+    .eq('telefono', conductorTelefonoActual)
+    .maybeSingle();
+
+  const { data, error } = await supabase
+    .from('viajes')
+    .update({
+      estado: 'conductor_asignado',
+      conductor_telefono: conductorTelefonoActual,
+      nombre_conductor: conductorRow?.nombre || 'Conductor',
+      patente_conductor: conductorRow?.patente || null,
+      modelo_auto_conductor: conductorRow?.modelo_auto || null,
+      color_auto_conductor: conductorRow?.color_auto || null,
+      eta_minutos: 3,
+    })
+    .eq('id', viajeId)
+    .is('conductor_telefono', null) // <- evita que dos conductores tomen el mismo viaje a la vez
+    .select()
+    .single();
+
+  if (error || !data) {
+    // No afecto ninguna fila: alguien mas lo acepto primero.
+    btnEl.textContent = 'Ya fue tomado';
+    setTimeout(() => refrescarListaPendientes(), 800);
+    return;
+  }
+
+  detenerListaPendientes();
+  conductorDisponible = false;
+  actualizarToggleUI();
+
+  await supabase.from('conductores').update({ disponible: false }).eq('telefono', conductorTelefonoActual);
+
+  // evaluarViajeConductor (suscripcion ya activa desde iniciarSupervisionViajeConductor)
+  // va a detectar este viaje nuevo y disparar entrarAVistaViajeActiva() sola.
+}
+
+// ---- FASE 4: vista del conductor durante el viaje activo ----
+async function entrarAVistaViajeActiva(viaje) {
+  conductorViajeActivo = viaje;
+  mostrarOverlay(null);
+  driverWaitingOverlay.classList.remove('show');
+  sheet.style.display = 'none'; // el sheet de pasajero no debe verse detras en sesion de conductor
+  driverActiveSheet.style.display = 'block';
+
+  const auto = [viaje.modelo_auto_conductor, viaje.color_auto_conductor].filter(Boolean).join(' · ');
+  driverActiveInfo.innerHTML = `
+    <strong>Origen:</strong> ${viaje.origen_direccion || 'sin especificar'}<br>
+    ${auto ? `<strong>Tu auto:</strong> ${auto}<br>` : ''}
+    <strong>Precio:</strong> ${viaje.precio ? `$ ${Number(viaje.precio).toLocaleString('es-AR')}` : '—'}
+  `;
+
+  actualizarBotonesViajeActivo(viaje.estado);
+
+  // Ruta desde la posicion actual del conductor hasta el origen del pasajero.
+  if (viaje.origen_lat != null && viaje.origen_lng != null) {
+    await dibujarRutaConductorHaciaOrigen(viaje);
+  }
+}
+
+function actualizarBotonesViajeActivo(estado) {
+  btnConductorLlegue.style.display = estado === 'conductor_asignado' ? 'block' : 'none';
+  btnConductorIniciar.style.display = estado === 'llegó' ? 'block' : 'none';
+  btnConductorFinalizar.style.display = estado === 'en_viaje' ? 'block' : 'none';
+
+  driverActiveTitulo.textContent =
+    estado === 'conductor_asignado' ? 'Yendo a buscar al pasajero'
+    : estado === 'llegó' ? 'Esperando al pasajero'
+    : estado === 'en_viaje' ? 'Viaje en curso'
+    : 'Viaje';
+}
+
+async function obtenerPosicionActualConductor() {
+  if (!('geolocation' in navigator)) return null;
+  return new Promise((resolve) => {
+    navigator.geolocation.getCurrentPosition(
+      (pos) => resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
+      () => resolve(null),
+      { enableHighAccuracy: true, timeout: 8000 },
+    );
+  });
+}
+
+async function dibujarRutaConductorHaciaOrigen(viaje) {
+  const posActual = await obtenerPosicionActualConductor();
+  if (!posActual) return;
+
+  const destino = { lat: viaje.origen_lat, lng: viaje.origen_lng };
+  const ruta = await getRuta([posActual, destino]);
+  if (!ruta || !map.getSource('ruta')) return;
+
+  map.getSource('ruta').setData({ type: 'Feature', properties: {}, geometry: ruta.geometry });
+  rutaGeometriaActual = ruta.geometry?.coordinates || null;
+  window._iniciarAnimacionGlow?.();
+
+  const bounds = new mapboxgl.LngLatBounds()
+    .extend([posActual.lng, posActual.lat])
+    .extend([destino.lng, destino.lat]);
+  map.fitBounds(bounds, { padding: 80 });
+}
+
+async function dibujarRutaConductorViajeCompleto(viaje) {
+  const { data: paradasViaje } = await supabase
+    .from('paradas')
+    .select('*')
+    .eq('viaje_id', viaje.id)
+    .order('orden', { ascending: true });
+
+  if (!paradasViaje || paradasViaje.length === 0) return;
+
+  const origen = { lat: viaje.origen_lat, lng: viaje.origen_lng };
+  const puntos = [origen, ...paradasViaje.map((p) => ({ lat: p.lat, lng: p.lng }))];
+  const ruta = await getRuta(puntos);
+  if (!ruta || !map.getSource('ruta')) return;
+
+  map.getSource('ruta').setData({ type: 'Feature', properties: {}, geometry: ruta.geometry });
+  rutaGeometriaActual = ruta.geometry?.coordinates || null;
+  window._iniciarAnimacionGlow?.();
+
+  const bounds = new mapboxgl.LngLatBounds();
+  puntos.forEach((p) => bounds.extend([p.lng, p.lat]));
+  map.fitBounds(bounds, { padding: 80 });
+}
+
+btnConductorLlegue.addEventListener('click', async () => {
+  if (!conductorViajeActivo) return;
+  btnConductorLlegue.disabled = true;
+  const { error } = await supabase
+    .from('viajes')
+    .update({ estado: 'llegó' })
+    .eq('id', conductorViajeActivo.id);
+  btnConductorLlegue.disabled = false;
+  if (error) console.error('[Movi] Error marcando "llegué":', error);
+  // La actualizacion de UI la dispara evaluarViajeConductor via Realtime.
+});
+
+btnConductorIniciar.addEventListener('click', async () => {
+  if (!conductorViajeActivo) return;
+  btnConductorIniciar.disabled = true;
+  const { error } = await supabase
+    .from('viajes')
+    .update({ estado: 'en_viaje' })
+    .eq('id', conductorViajeActivo.id);
+  btnConductorIniciar.disabled = false;
+  if (error) console.error('[Movi] Error iniciando viaje:', error);
+});
+
+btnConductorFinalizar.addEventListener('click', async () => {
+  if (!conductorViajeActivo) return;
+  btnConductorFinalizar.disabled = true;
+  const { error } = await supabase
+    .from('viajes')
+    .update({ estado: 'finalizado' })
+    .eq('id', conductorViajeActivo.id);
+  btnConductorFinalizar.disabled = false;
+  if (error) console.error('[Movi] Error finalizando viaje:', error);
+});
+
+// ---- FASE 5: al terminar/cancelarse, volver a la lista de pendientes ----
+async function salirDeVistaViajeActiva() {
+  conductorViajeActivo = null;
+  driverActiveSheet.style.display = 'none';
+  sheet.style.display = ''; // deja que la hoja de pasajero vuelva a su estado normal por si se cambia de rol
+
+  if (map.getSource('ruta')) {
+    map.getSource('ruta').setData({ type: 'FeatureCollection', features: [] });
+  }
+  rutaGeometriaActual = null;
+
+  if (conductorTelefonoActual) {
+    await supabase.from('conductores').update({ disponible: true }).eq('telefono', conductorTelefonoActual);
+  }
+  conductorDisponible = true;
+  actualizarToggleUI();
+
+  mostrarOverlay(driverWaitingOverlay);
+  iniciarListaPendientes();
+}
+
 function evaluarViajeConductor(viaje, telefono) {
   const activo = viaje && !ESTADOS_VIAJE_INACTIVO_CONDUCTOR.includes(viaje.estado);
+
   if (activo) {
     iniciarTrackingConductor(telefono);
+
+    if (!conductorViajeActivo || conductorViajeActivo.id !== viaje.id) {
+      entrarAVistaViajeActiva(viaje);
+    } else {
+      const estadoPrevio = conductorViajeActivo.estado;
+      conductorViajeActivo = viaje;
+      actualizarBotonesViajeActivo(viaje.estado);
+      if (viaje.estado === 'en_viaje' && estadoPrevio !== 'en_viaje') {
+        dibujarRutaConductorViajeCompleto(viaje);
+      }
+    }
   } else {
     detenerTrackingConductor();
+    if (conductorViajeActivo) {
+      salirDeVistaViajeActiva();
+    }
   }
 }
 
 // Prende (o apaga) el tracking segun haya o no un viaje en curso para
 // este conductor, y se queda escuchando cambios en tiempo real para
 // reaccionar apenas se le asigna un viaje o el viaje termina/se cancela.
+// Tambien deja lista la sesion del conductor: quien es (conductorTelefonoActual),
+// su disponibilidad real (leida de Supabase, no asumida en false), y si hay
+// o no un viaje activo ya asignado desde antes (por si recargo la pagina).
 function iniciarSupervisionViajeConductor(telefono) {
+  conductorTelefonoActual = telefono;
+
   if (canalViajeConductor) {
     supabase.removeChannel(canalViajeConductor);
     canalViajeConductor = null;
   }
+
+  // Disponibilidad real guardada en Supabase (si el conductor recarga la
+  // pagina, no queremos que la UI vuelva a "no disponible" por defecto).
+  supabase
+    .from('conductores')
+    .select('disponible')
+    .eq('telefono', telefono)
+    .maybeSingle()
+    .then(({ data }) => {
+      conductorDisponible = Boolean(data?.disponible);
+      actualizarToggleUI();
+      if (conductorDisponible && !conductorViajeActivo) {
+        iniciarListaPendientes();
+      }
+    });
 
   // Estado inicial: por si el conductor recarga la app en medio de un viaje.
   supabase
@@ -712,24 +1095,153 @@ function sincronizarCapaAutoConductor() {
   }
 }
 
-// Dibuja (a los saltos por ahora) la posicion recibida en el source del
-// icono del auto. La interpolacion suave se agrega en el paso siguiente.
-function aplicarNuevaPosicionConductor(fix) {
-  if (!fix || fix.lat == null || fix.lng == null) return;
+// ==================================================================
+//  FIX: el auto se movía directo a las coordenadas crudas del GPS del
+//  conductor, sin relación con la ruta dibujada — por eso se veía
+//  "flotando" lejos de la calle y no se acercaba prolijamente al pin
+//  de origen (el margen de error normal del GPS, unos 5-15m en
+//  ciudad, alcanza para caer en la vereda de al lado o en un techo).
+//  Se agrega una proyección sobre la geometría real de la ruta
+//  (rutaGeometriaActual), asi el icono queda siempre "pegado" a la
+//  calle, mas una animacion suave entre fixes (antes saltaba de
+//  golpe cada vez que llegaba una actualizacion).
+// ==================================================================
+const METROS_POR_GRADO_LAT_AUTO = 111320;
 
-  posicionConductor = { lat: fix.lat, lng: fix.lng, heading: fix.heading != null ? fix.heading : 0 };
+// Proyecta un punto {lat,lng} sobre el segmento a-b (ambos [lng,lat]) y
+// devuelve el punto mas cercano de ese segmento + que tan lejos quedo (en
+// metros, aproximado) + el rumbo del segmento en si (direccion de la calle
+// en ese tramo). Aproximacion plana con correccion de longitud por
+// latitud: de sobra de precision a escala de una ciudad como Viedma.
+function proyectarEnSegmento(lat, lng, a, b) {
+  const latRef = a[1] * Math.PI / 180;
+  const metrosPorGradoLng = METROS_POR_GRADO_LAT_AUTO * Math.cos(latRef);
 
+  const px = lng * metrosPorGradoLng;
+  const py = lat * METROS_POR_GRADO_LAT_AUTO;
+  const ax = a[0] * metrosPorGradoLng;
+  const ay = a[1] * METROS_POR_GRADO_LAT_AUTO;
+  const bx = b[0] * metrosPorGradoLng;
+  const by = b[1] * METROS_POR_GRADO_LAT_AUTO;
+
+  const dx = bx - ax;
+  const dy = by - ay;
+  const largo2 = dx * dx + dy * dy;
+
+  let t = largo2 === 0 ? 0 : ((px - ax) * dx + (py - ay) * dy) / largo2;
+  t = Math.max(0, Math.min(1, t));
+
+  const projX = ax + t * dx;
+  const projY = ay + t * dy;
+  const distanciaMetros = Math.hypot(px - projX, py - projY);
+
+  const lngProj = projX / metrosPorGradoLng;
+  const latProj = projY / METROS_POR_GRADO_LAT_AUTO;
+  const rumboSegmento = calcularRumbo({ lat: a[1], lng: a[0] }, { lat: b[1], lng: b[0] });
+
+  return { lat: latProj, lng: lngProj, distanciaMetros, rumboSegmento };
+}
+
+// Recorre toda la geometria de la ruta y devuelve el punto mas cercano al
+// fix crudo del GPS. Si el conductor se desvio mucho de la ruta calculada
+// (>60m, por ejemplo tomo otro camino), se devuelve el fix crudo tal cual
+// en vez de "pegarlo" a una calle que ya no esta siguiendo.
+function proyectarEnRuta(lat, lng, coordenadas) {
+  if (!coordenadas || coordenadas.length < 2) return null;
+
+  let mejor = null;
+  for (let i = 0; i < coordenadas.length - 1; i++) {
+    const candidato = proyectarEnSegmento(lat, lng, coordenadas[i], coordenadas[i + 1]);
+    if (!mejor || candidato.distanciaMetros < mejor.distanciaMetros) {
+      mejor = candidato;
+    }
+  }
+
+  if (!mejor || mejor.distanciaMetros > 60) return null;
+  return mejor;
+}
+
+// Angulo mas corto entre dos rumbos (0-360), para que la rotacion del
+// icono nunca "de la vuelta larga" (ej: de 350° a 10° debe animar +20°,
+// no -340°).
+function interpolarAngulo(desde, hasta, t) {
+  let diferencia = ((hasta - desde + 540) % 360) - 180;
+  return (desde + diferencia * t + 360) % 360;
+}
+
+let animacionAutoFrameId = null;
+let posicionAutoMostrada = null; // ultima posicion realmente pintada en el mapa
+
+function pintarAutoEnMapa(lat, lng, heading) {
   const source = map.getSource('auto-conductor');
   if (!source) return;
-
   source.setData({
     type: 'FeatureCollection',
     features: [{
       type: 'Feature',
-      geometry: { type: 'Point', coordinates: [posicionConductor.lng, posicionConductor.lat] },
-      properties: { heading: posicionConductor.heading },
+      geometry: { type: 'Point', coordinates: [lng, lat] },
+      properties: { heading },
     }],
   });
+  posicionConductor = { lat, lng, heading };
+}
+
+// Anima el icono del auto desde su posicion actual en pantalla hasta la
+// nueva posicion objetivo, en vez de saltar de golpe. La duracion (2.2s)
+// queda un poco por debajo del intervalo tipico entre fixes de GPS (3s)
+// para que la animacion siempre termine antes de que llegue el proximo.
+function animarAutoHacia(latDestino, lngDestino, headingDestino) {
+  if (animacionAutoFrameId !== null) {
+    cancelAnimationFrame(animacionAutoFrameId);
+    animacionAutoFrameId = null;
+  }
+
+  const desde = posicionAutoMostrada || { lat: latDestino, lng: lngDestino, heading: headingDestino };
+  const duracion = 2200;
+  const inicio = performance.now();
+
+  function tick(ahora) {
+    const t = Math.min(1, (ahora - inicio) / duracion);
+    const lat = desde.lat + (latDestino - desde.lat) * t;
+    const lng = desde.lng + (lngDestino - desde.lng) * t;
+    const heading = interpolarAngulo(desde.heading, headingDestino, t);
+
+    pintarAutoEnMapa(lat, lng, heading);
+
+    if (t < 1) {
+      animacionAutoFrameId = requestAnimationFrame(tick);
+    } else {
+      animacionAutoFrameId = null;
+      posicionAutoMostrada = { lat: latDestino, lng: lngDestino, heading: headingDestino };
+    }
+  }
+
+  animacionAutoFrameId = requestAnimationFrame(tick);
+}
+
+function aplicarNuevaPosicionConductor(fix) {
+  if (!fix || fix.lat == null || fix.lng == null) return;
+
+  const proyeccion = rutaGeometriaActual
+    ? proyectarEnRuta(fix.lat, fix.lng, rutaGeometriaActual)
+    : null;
+
+  // Preferimos la posicion "enganchada" a la calle; si el conductor se
+  // desvio de la ruta calculada (o todavia no hay ruta dibujada), usamos
+  // el punto crudo del GPS tal cual, para no perder la posicion real.
+  const latObjetivo = proyeccion ? proyeccion.lat : fix.lat;
+  const lngObjetivo = proyeccion ? proyeccion.lng : fix.lng;
+
+  // Para la rotacion: el heading del dispositivo es mas confiable cuando
+  // viene (indica hacia donde apunta el telefono/auto de verdad), pero si
+  // no vino (comun a baja velocidad) usamos el rumbo de la calle en ese
+  // tramo de la ruta como mejor aproximacion disponible.
+  let headingObjetivo = fix.heading;
+  if (headingObjetivo == null || Number.isNaN(headingObjetivo)) {
+    headingObjetivo = proyeccion ? proyeccion.rumboSegmento : 0;
+  }
+
+  animarAutoHacia(latObjetivo, lngObjetivo, headingObjetivo);
 }
 
 function iniciarSeguimientoPosicionConductor(telefono) {
@@ -770,6 +1282,13 @@ function detenerSeguimientoPosicionConductor() {
   }
   telefonoConductorSeguido = null;
   posicionConductor = null;
+
+  if (animacionAutoFrameId !== null) {
+    cancelAnimationFrame(animacionAutoFrameId);
+    animacionAutoFrameId = null;
+  }
+  posicionAutoMostrada = null;
+  rutaGeometriaActual = null;
 
   const source = map.getSource('auto-conductor');
   if (source) source.setData({ type: 'FeatureCollection', features: [] });
@@ -980,6 +1499,7 @@ async function recalcularRuta() {
   if (map.getSource('ruta')) {
     map.getSource('ruta').setData({ type: 'Feature', properties: {}, geometry: ruta.geometry });
   }
+  rutaGeometriaActual = ruta.geometry?.coordinates || null;
 
   // Iniciar (o reanudar) la animación del glow ahora que hay ruta
   window._iniciarAnimacionGlow();
@@ -1172,6 +1692,27 @@ const buscandoOverlay = document.getElementById('buscando-overlay');
 const driverSheet = document.getElementById('driver-sheet');
 const paymentSheet = document.getElementById('payment-sheet');
 
+// Canal Realtime que escucha un viaje puntual mientras el pasajero espera
+// que algun conductor real lo acepte (ver btn-pedir-viaje). Se cierra apenas
+// se asigna o se cancela, para no dejar suscripciones colgadas.
+let canalEsperaAsignacion = null;
+
+// Llena el driver-sheet con los datos reales del conductor que acepto el
+// viaje (antes quedaba siempre con el texto de ejemplo "Leyvan Esquercia").
+function aplicarDatosConductorEnSheet(viaje) {
+  const nombre = viaje.nombre_conductor || 'Conductor';
+  const auto = [viaje.modelo_auto_conductor, viaje.color_auto_conductor].filter(Boolean).join(' · ');
+
+  document.querySelector('#driver-sheet .driver-avatar').textContent = nombre.charAt(0).toUpperCase();
+  document.querySelector('#driver-sheet .driver-name').textContent = nombre;
+  document.querySelector('#driver-sheet .driver-car').textContent = auto || 'Auto';
+
+  if (viaje.eta_minutos != null) {
+    const chips = document.querySelectorAll('#driver-sheet .eta-chip');
+    if (chips[1]) chips[1].textContent = `${viaje.eta_minutos} min`;
+  }
+}
+
 // ==================================================================
 //  Botones de paradas: reutilizan el mismo buscador de direcciones,
 //  la diferencia es que boton se toco antes de buscar (modoBusqueda).
@@ -1219,63 +1760,112 @@ document.getElementById('btn-pedir-viaje').addEventListener('click', async () =>
   const usuarioActual = cargarUsuario();
   const telefonoPasajero = usuarioActual ? usuarioActual.telefono : '';
 
+  // FIX: el insert real no estaba guardando el origen (lat/lng/direccion) —
+  // solo lo hacia la simulacion del panel de dev. Sin esto, la lista de
+  // pendientes del conductor y el calculo de ruta hacia el origen (Fase 4)
+  // no tendrian de donde sacar esos datos.
+  const origenDireccion = await reverseGeocode(origenActual.lat, origenActual.lng)
+    || `${origenActual.lat.toFixed(5)}, ${origenActual.lng.toFixed(5)}`;
+
+  // FASE 3: ya no se asigna un conductor solo/al azar (buscarConductorDisponible
+  // quedo sin uso mas abajo, solo la sigue llamando el panel de dev para sus
+  // pruebas). El viaje queda en "pendiente" real y esperamos a que un
+  // conductor de verdad lo acepte desde su propia pantalla.
   const { data: viaje, error } = await supabase
     .from('viajes')
-    .insert({ estado: 'buscando', precio, telefono_pasajero: telefonoPasajero })
+    .insert({
+      estado: 'pendiente',
+      precio,
+      telefono_pasajero: telefonoPasajero,
+      origen_lat: origenActual.lat,
+      origen_lng: origenActual.lng,
+      origen_direccion: origenDireccion,
+    })
     .select()
     .single();
 
   if (error) {
     console.error('[Movi] Error creando viaje en Supabase:', error);
+    buscandoOverlay.classList.remove('show');
+    return;
   }
 
-  viajeActivoPasajero = viaje || null;
+  viajeActivoPasajero = viaje;
   sincronizarCapaAutoConductor();
 
   // Guardamos cada parada de la lista (incluido el destino final) en la
   // tabla "paradas", asociada al viaje recien creado.
-  if (viaje) {
-    const { error: errorParadas } = await supabase
-      .from('paradas')
-      .insert(paradas.map((p) => ({
-        viaje_id: viaje.id,
-        orden: p.orden,
-        direccion: p.direccion,
-        lat: p.lat,
-        lng: p.lng,
-      })));
+  const { error: errorParadas } = await supabase
+    .from('paradas')
+    .insert(paradas.map((p) => ({
+      viaje_id: viaje.id,
+      orden: p.orden,
+      direccion: p.direccion,
+      lat: p.lat,
+      lng: p.lng,
+    })));
 
-    if (errorParadas) {
-      console.error('[Movi] Error guardando paradas en Supabase:', errorParadas);
-    }
+  if (errorParadas) {
+    console.error('[Movi] Error guardando paradas en Supabase:', errorParadas);
   }
 
-  // Simulamos 2s de busqueda, despues "encontramos" un conductor
-  setTimeout(async () => {
-    buscandoOverlay.classList.remove('show');
-    sheet.style.display = 'none';
-    driverSheet.style.display = 'block';
+  // Nos quedamos escuchando este viaje puntual hasta que un conductor real
+  // lo acepte (pasa a "conductor_asignado" con conductor_telefono cargado)
+  // o hasta que se cancele desde otro lado.
+  if (canalEsperaAsignacion) {
+    supabase.removeChannel(canalEsperaAsignacion);
+    canalEsperaAsignacion = null;
+  }
 
-    if (viaje) {
-      const conductor = await buscarConductorDisponible();
-      const datosConductor = datosConductorParaViaje(conductor, 'Leyvan Esquercia');
+  canalEsperaAsignacion = supabase
+    .channel(`espera-asignacion-${viaje.id}`)
+    .on(
+      'postgres_changes',
+      { event: 'UPDATE', schema: 'public', table: 'viajes', filter: `id=eq.${viaje.id}` },
+      (payload) => {
+        const actualizado = payload.new;
+        viajeActivoPasajero = actualizado;
 
-      const { error: errorUpdate } = await supabase
-        .from('viajes')
-        .update({ estado: 'conductor_asignado', eta_minutos: 2, ...datosConductor })
-        .eq('id', viaje.id);
-      if (errorUpdate) {
-        console.error('[Movi] Error actualizando viaje en Supabase:', errorUpdate);
-      } else {
-        viajeActivoPasajero = { ...viajeActivoPasajero, estado: 'conductor_asignado', eta_minutos: 2, ...datosConductor };
-        sincronizarCapaAutoConductor();
-      }
-    }
-  }, 2000);
+        if (actualizado.estado === 'conductor_asignado' && actualizado.conductor_telefono) {
+          buscandoOverlay.classList.remove('show');
+          sheet.style.display = 'none';
+          driverSheet.style.display = 'block';
+          aplicarDatosConductorEnSheet(actualizado);
+          sincronizarCapaAutoConductor();
+
+          if (canalEsperaAsignacion) {
+            supabase.removeChannel(canalEsperaAsignacion);
+            canalEsperaAsignacion = null;
+          }
+        } else if (actualizado.estado === 'cancelado') {
+          buscandoOverlay.classList.remove('show');
+          viajeActivoPasajero = null;
+          sincronizarCapaAutoConductor();
+          if (canalEsperaAsignacion) {
+            supabase.removeChannel(canalEsperaAsignacion);
+            canalEsperaAsignacion = null;
+          }
+        }
+      },
+    )
+    .subscribe();
 });
 
-document.getElementById('btn-cancelar-busqueda').addEventListener('click', () => {
+document.getElementById('btn-cancelar-busqueda').addEventListener('click', async () => {
   buscandoOverlay.classList.remove('show');
+
+  if (canalEsperaAsignacion) {
+    supabase.removeChannel(canalEsperaAsignacion);
+    canalEsperaAsignacion = null;
+  }
+
+  // El viaje que estaba pendiente ya no debe seguir apareciendo en la
+  // lista de los conductores.
+  if (viajeActivoPasajero && viajeActivoPasajero.estado === 'pendiente') {
+    await supabase.from('viajes').update({ estado: 'cancelado' }).eq('id', viajeActivoPasajero.id);
+  }
+  viajeActivoPasajero = null;
+  sincronizarCapaAutoConductor();
 });
 
 document.getElementById('btn-cancelar-viaje').addEventListener('click', () => {
@@ -1407,12 +1997,115 @@ document.querySelectorAll('.drawer-item, .drawer [data-item]').forEach((item) =>
         canalViajeConductor = null;
       }
       detenerSeguimientoPosicionConductor();
+      detenerListaPendientes();
+      conductorTelefonoActual = null;
+      conductorViajeActivo = null;
+      driverActiveSheet.style.display = 'none';
+      sheet.style.display = '';
       bloquearApp(true);
       searchInput.value = '';
       ocultarResultados();
       mostrarOverlay(roleSelectOverlay);
     }
+
+    if (accion === 'historial') {
+      abrirHistorial();
+    }
   });
+});
+
+// ==================================================================
+//  FASE 6 — Historial de viajes (pasajero y conductor)
+// ==================================================================
+const historialOverlay = document.getElementById('historial-overlay');
+const historialLista = document.getElementById('historial-lista');
+const btnCerrarHistorial = document.getElementById('btn-cerrar-historial');
+
+function formatearFechaHistorial(fechaISO) {
+  const fecha = new Date(fechaISO);
+  return fecha.toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' })
+    + ' ' + fecha.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' });
+}
+
+async function abrirHistorial() {
+  historialOverlay.classList.add('show');
+  historialLista.innerHTML = '<div class="result-empty">Cargando...</div>';
+
+  const rolActual = localStorage.getItem('rol');
+  let query = supabase.from('viajes').select('*').in('estado', ['finalizado', 'cancelado']);
+
+  if (rolActual === 'conductor' && conductorTelefonoActual) {
+    query = query.eq('conductor_telefono', conductorTelefonoActual);
+  } else {
+    const usuario = cargarUsuario();
+    if (!usuario) {
+      historialLista.innerHTML = '<div class="result-empty">Sin viajes todavía</div>';
+      return;
+    }
+    query = query.eq('telefono_pasajero', usuario.telefono);
+  }
+
+  const { data, error } = await query.order('creado_en', { ascending: false }).limit(50);
+
+  if (error) {
+    console.error('[Movi] Error trayendo historial:', error);
+    historialLista.innerHTML = '<div class="result-empty">Error cargando el historial</div>';
+    return;
+  }
+
+  if (!data || data.length === 0) {
+    historialLista.innerHTML = '<div class="result-empty">Sin viajes todavía</div>';
+    return;
+  }
+
+  // Traemos las paradas de todos estos viajes en una sola consulta para no
+  // hacer N llamadas separadas (igual que en la lista de pendientes).
+  const ids = data.map((v) => v.id);
+  const { data: paradasData } = await supabase
+    .from('paradas')
+    .select('*')
+    .in('viaje_id', ids)
+    .order('orden', { ascending: true });
+
+  const paradasPorViaje = {};
+  (paradasData || []).forEach((p) => {
+    if (!paradasPorViaje[p.viaje_id]) paradasPorViaje[p.viaje_id] = [];
+    paradasPorViaje[p.viaje_id].push(p);
+  });
+
+  historialLista.innerHTML = data.map((v) => {
+    const paradasViaje = paradasPorViaje[v.id] || [];
+    const destinoTexto = paradasViaje.length === 0
+      ? (v.destino_direccion || 'Destino sin especificar')
+      : paradasViaje.length === 1
+        ? (paradasViaje[0].direccion || 'Destino')
+        : `${paradasViaje.length} paradas`;
+    const origenTexto = v.origen_direccion || 'Origen sin especificar';
+    const precioTexto = v.precio ? `$ ${Number(v.precio).toLocaleString('es-AR')}` : '$ —';
+    const estadoTexto = v.estado === 'finalizado' ? 'Completado' : 'Cancelado';
+    const estadoColor = v.estado === 'finalizado' ? 'var(--verde-fuerte)' : '#C0392B';
+
+    return `
+      <div class="parada-row" style="align-items:flex-start; flex-direction:column; gap:6px;">
+        <div style="display:flex; justify-content:space-between; width:100%;">
+          <span style="font-size:11.5px; font-weight:700; color:var(--texto-muted);">${formatearFechaHistorial(v.creado_en)}</span>
+          <span style="font-size:11.5px; font-weight:800; color:${estadoColor};">${estadoTexto}</span>
+        </div>
+        <div style="font-size:13px; font-weight:700; color:var(--negro); line-height:1.4;">
+          ${origenTexto} → ${destinoTexto}
+        </div>
+        <div style="font-size:13px; font-weight:800; color:var(--verde-fuerte);">${precioTexto}</div>
+      </div>
+    `;
+  }).join('');
+}
+
+btnCerrarHistorial.addEventListener('click', () => {
+  historialOverlay.classList.remove('show');
+});
+
+historialOverlay.addEventListener('click', (e) => {
+  if (e.target === historialOverlay) historialOverlay.classList.remove('show');
 });
 
 // ==================================================================
