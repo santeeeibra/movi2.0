@@ -125,6 +125,7 @@
       <div class="spinner"></div>
       <div class="buscando-titulo">Buscando conductor cercano...</div>
       <button class="cancel-btn" id="btn-cancelar-busqueda">Cancelar</button>
+      <button class="dev-skip-link" id="dev-saltar-buscando" style="display:none;">🧪 Saltear: simular encontrar conductor</button>
     </div>
   </div>
 
@@ -167,6 +168,11 @@
 
     <button class="cancel-btn" id="btn-cancelar-viaje">Cancelar</button>
     <button class="dev-sim-btn" id="btn-simular-fin">Simular fin de viaje</button>
+
+    <div class="dev-controles-viaje" id="dev-controles-viaje" style="display:none;">
+      <button class="dev-inline-btn" id="dev-btn-saltar-leg">⏭️ Saltear animación</button>
+      <button class="dev-inline-btn" id="dev-btn-iniciar-viaje-sim">▶️ Iniciar viaje simulado</button>
+    </div>
   </div>
 
   <div class="sheet" id="payment-sheet" style="display:none;">

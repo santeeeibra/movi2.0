@@ -1793,6 +1793,7 @@ document.getElementById('btn-pedir-viaje').addEventListener('click', async () =>
   console.log('[Movi] Iniciando guardado de viaje en Supabase...');
 
   buscandoOverlay.classList.add('show');
+  actualizarControlesDevEnViaje();
 
   const precioTexto = document.getElementById('ride-price-normal').textContent;
   const precio = Number(precioTexto.replace(/[^0-9]/g, '')) || null;
@@ -1849,42 +1850,69 @@ document.getElementById('btn-pedir-viaje').addEventListener('click', async () =>
     console.error('[Movi] Error guardando paradas en Supabase:', errorParadas);
   }
 
-  // Nos quedamos escuchando este viaje puntual hasta que un conductor real
-  // lo acepte (pasa a "conductor_asignado" con conductor_telefono cargado)
-  // o hasta que se cancele desde otro lado.
+  // Nos quedamos escuchando este viaje durante TODO su ciclo de vida (no
+  // solo hasta que se asigne conductor) — antes el canal se cerraba apenas
+  // se asignaba, asi que ni con un conductor real ni con la simulacion se
+  // iba a enterar nunca de "llego"/"en_viaje"/"finalizado" mas adelante.
   if (canalEsperaAsignacion) {
     supabase.removeChannel(canalEsperaAsignacion);
     canalEsperaAsignacion = null;
   }
 
   canalEsperaAsignacion = supabase
-    .channel(`espera-asignacion-${viaje.id}`)
+    .channel(`viaje-activo-pasajero-${viaje.id}`)
     .on(
       'postgres_changes',
       { event: 'UPDATE', schema: 'public', table: 'viajes', filter: `id=eq.${viaje.id}` },
       (payload) => {
         const actualizado = payload.new;
+        const estadoAnterior = viajeActivoPasajero?.estado;
         viajeActivoPasajero = actualizado;
+        sincronizarCapaAutoConductor();
 
-        if (actualizado.estado === 'conductor_asignado' && actualizado.conductor_telefono) {
+        if (actualizado.estado === 'conductor_asignado' && actualizado.conductor_telefono && estadoAnterior !== 'conductor_asignado') {
           buscandoOverlay.classList.remove('show');
           sheet.style.display = 'none';
           driverSheet.style.display = 'block';
           aplicarDatosConductorEnSheet(actualizado);
-          sincronizarCapaAutoConductor();
+          actualizarControlesDevEnViaje();
 
-          if (canalEsperaAsignacion) {
-            supabase.removeChannel(canalEsperaAsignacion);
-            canalEsperaAsignacion = null;
+          // En modo admin (testing), como no hay un conductor real
+          // mandando su GPS, arrancamos nosotros mismos una simulacion de
+          // acercamiento hacia el origen real de este viaje, para poder
+          // seguir probando el resto de las pantallas sin depender de un
+          // segundo dispositivo.
+          if (esAdmin()) {
+            const puntoPartida = {
+              lat: actualizado.origen_lat - 0.0055,
+              lng: actualizado.origen_lng - 0.0005,
+            };
+            simAutoIniciar(
+              [puntoPartida, { lat: actualizado.origen_lat, lng: actualizado.origen_lng }],
+              actualizado.conductor_telefono,
+              null,
+            );
           }
         } else if (actualizado.estado === 'cancelado') {
           buscandoOverlay.classList.remove('show');
           viajeActivoPasajero = null;
-          sincronizarCapaAutoConductor();
+          simAutoDetener();
           if (canalEsperaAsignacion) {
             supabase.removeChannel(canalEsperaAsignacion);
             canalEsperaAsignacion = null;
           }
+        } else if (actualizado.estado === 'finalizado') {
+          driverSheet.style.display = 'none';
+          resetPaymentSheet();
+          paymentSheet.style.display = 'block';
+          paymentSheet.classList.remove('collapsed');
+          simAutoDetener();
+          if (canalEsperaAsignacion) {
+            supabase.removeChannel(canalEsperaAsignacion);
+            canalEsperaAsignacion = null;
+          }
+        } else {
+          actualizarControlesDevEnViaje();
         }
       },
     )
@@ -1893,6 +1921,7 @@ document.getElementById('btn-pedir-viaje').addEventListener('click', async () =>
 
 document.getElementById('btn-cancelar-busqueda').addEventListener('click', async () => {
   buscandoOverlay.classList.remove('show');
+  actualizarControlesDevEnViaje();
 
   if (canalEsperaAsignacion) {
     supabase.removeChannel(canalEsperaAsignacion);
@@ -1912,7 +1941,9 @@ document.getElementById('btn-cancelar-viaje').addEventListener('click', () => {
   driverSheet.style.display = 'none';
   sheet.style.display = 'block';
   viajeActivoPasajero = null;
+  simAutoDetener();
   sincronizarCapaAutoConductor();
+  actualizarControlesDevEnViaje();
 });
 
 document.getElementById('btn-llamar').addEventListener('click', () => {
@@ -2578,6 +2609,211 @@ function devPuntoEnDistancia(coords, acumuladas, distancia) {
 
   return { lat, lng, heading };
 }
+
+// ==================================================================
+//  MOTOR GENÉRICO DE SIMULACIÓN — usado tanto por el panel de dev (mas
+//  abajo) como por el flujo REAL de "Pedir viaje" cuando quien esta
+//  probando es admin (ver btn-pedir-viaje). A diferencia de
+//  devSimularRecorrido (que usa coordenadas de prueba fijas), este toma
+//  cualquier punto real (origen/paradas/destino que el pasajero eligio
+//  de verdad) y ademas permite "saltar" la animacion al final en
+//  cualquier momento con simAutoSaltarAlFinal(), ejecutando igual el
+//  callback de finalizacion que se le haya pasado.
+// ==================================================================
+function esAdmin() {
+  return localStorage.getItem('es_admin') === 'true';
+}
+
+let simAutoFrameId = null;
+let simAutoCoords = null;
+let simAutoAcumuladas = null;
+let simAutoDistanciaTotal = null;
+let simAutoTelefono = null;
+let simAutoCallbackFinal = null;
+
+function simAutoEscribirSupabase(punto) {
+  supabase
+    .from('conductores')
+    .update({ lat: punto.lat, lng: punto.lng, heading: punto.heading, actualizado_en: new Date().toISOString() })
+    .eq('telefono', simAutoTelefono)
+    .then(({ error }) => {
+      if (error) console.error('[Sim] Error escribiendo posición simulada:', error);
+    });
+}
+
+function simAutoDetener() {
+  if (simAutoFrameId !== null) {
+    cancelAnimationFrame(simAutoFrameId);
+    simAutoFrameId = null;
+  }
+  simAutoCoords = null;
+  simAutoAcumuladas = null;
+  simAutoDistanciaTotal = null;
+  simAutoCallbackFinal = null;
+}
+
+// Corta la animacion en curso donde este y "teletransporta" al punto
+// final de esa etapa, ejecutando el callback que se le haya pasado a
+// simAutoIniciar (por ejemplo, marcar el viaje como finalizado). Es el
+// botón de "Saltear animación" que ve el admin en pantalla.
+function simAutoSaltarAlFinal() {
+  if (!simAutoCoords || !simAutoAcumuladas) return;
+
+  const final = devPuntoEnDistancia(simAutoCoords, simAutoAcumuladas, simAutoDistanciaTotal);
+  pintarAutoEnMapa(final.lat, final.lng, final.heading);
+  posicionAutoMostrada = final;
+  simAutoEscribirSupabase(final);
+
+  if (simAutoFrameId !== null) {
+    cancelAnimationFrame(simAutoFrameId);
+    simAutoFrameId = null;
+  }
+
+  const callback = simAutoCallbackFinal;
+  simAutoCoords = null;
+  simAutoAcumuladas = null;
+  simAutoDistanciaTotal = null;
+  simAutoCallbackFinal = null;
+
+  if (callback) callback();
+}
+
+async function simAutoIniciar(puntos, telefono, callbackAlLlegar) {
+  simAutoDetener();
+
+  const ruta = await getRuta(puntos);
+  if (!ruta || !ruta.geometry?.coordinates?.length) {
+    console.error('[Sim] No se pudo calcular la ruta para la simulación automática', puntos);
+    return;
+  }
+
+  if (map.getSource('ruta')) {
+    map.getSource('ruta').setData({ type: 'Feature', properties: {}, geometry: ruta.geometry });
+  }
+  rutaGeometriaActual = ruta.geometry.coordinates;
+  window._iniciarAnimacionGlow?.();
+
+  simAutoCoords = ruta.geometry.coordinates;
+  simAutoAcumuladas = devConstruirTablaDistancias(simAutoCoords);
+  simAutoDistanciaTotal = simAutoAcumuladas[simAutoAcumuladas.length - 1];
+  simAutoTelefono = telefono;
+  simAutoCallbackFinal = callbackAlLlegar;
+
+  const inicio = performance.now();
+  let ultimaEscritura = 0;
+
+  function frame(ahora) {
+    if (!simAutoCoords) return; // se cancelo/salteo desde otro lado
+
+    const segundos = (ahora - inicio) / 1000;
+    const distanciaRecorrida = VELOCIDAD_SIMULACION_MS * segundos;
+
+    if (distanciaRecorrida >= simAutoDistanciaTotal) {
+      simAutoSaltarAlFinal();
+      return;
+    }
+
+    const punto = devPuntoEnDistancia(simAutoCoords, simAutoAcumuladas, distanciaRecorrida);
+    pintarAutoEnMapa(punto.lat, punto.lng, punto.heading);
+    posicionAutoMostrada = punto;
+
+    if (ahora - ultimaEscritura > INTERVALO_ESCRITURA_SUPABASE_MS) {
+      ultimaEscritura = ahora;
+      simAutoEscribirSupabase(punto);
+    }
+
+    simAutoFrameId = requestAnimationFrame(frame);
+  }
+
+  simAutoFrameId = requestAnimationFrame(frame);
+}
+
+// ==================================================================
+//  Controles de admin embebidos en el flujo REAL (no en el panel de
+//  dev): un link para saltear la pantalla de "buscando conductor", y
+//  botones en driver-sheet para saltear la animacion en curso o
+//  arrancar el siguiente tramo del viaje. Solo visibles si esAdmin().
+// ==================================================================
+const devSaltarBuscando = document.getElementById('dev-saltar-buscando');
+const devControlesViaje = document.getElementById('dev-controles-viaje');
+const devBtnSaltarLeg = document.getElementById('dev-btn-saltar-leg');
+const devBtnIniciarViajeSim = document.getElementById('dev-btn-iniciar-viaje-sim');
+
+function actualizarControlesDevEnViaje() {
+  const admin = esAdmin();
+
+  devSaltarBuscando.style.display = admin && buscandoOverlay.classList.contains('show') ? 'block' : 'none';
+
+  if (!admin || !viajeActivoPasajero) {
+    devControlesViaje.style.display = 'none';
+    return;
+  }
+
+  const estado = viajeActivoPasajero.estado;
+  const enEspera = ['conductor_asignado', 'en_camino', 'llegó'].includes(estado);
+  const enViaje = estado === 'en_viaje';
+
+  devControlesViaje.style.display = (enEspera || enViaje) ? 'flex' : 'none';
+  devBtnIniciarViajeSim.style.display = enEspera ? 'inline-block' : 'none';
+  devBtnSaltarLeg.textContent = enViaje ? '⏭️ Saltear: llegar al destino' : '⏭️ Saltear animación';
+}
+
+devSaltarBuscando?.addEventListener('click', async () => {
+  if (!viajeActivoPasajero) return;
+  devSaltarBuscando.disabled = true;
+
+  const { error } = await supabase
+    .from('viajes')
+    .update({
+      estado: 'conductor_asignado',
+      conductor_telefono: TELEFONO_CONDUCTOR_PRUEBA,
+      nombre_conductor: 'Leyvan Esquercia',
+      patente_conductor: 'AB123CD',
+      modelo_auto_conductor: 'Toyota Corolla',
+      color_auto_conductor: 'Gris',
+      eta_minutos: 3,
+    })
+    .eq('id', viajeActivoPasajero.id);
+
+  devSaltarBuscando.disabled = false;
+  if (error) console.error('[Sim] Error al saltear la búsqueda de conductor:', error);
+  // El resto (mostrar driver-sheet, arrancar la simulacion hacia el
+  // origen) lo dispara solo la suscripcion Realtime del viaje.
+});
+
+devBtnSaltarLeg?.addEventListener('click', () => {
+  simAutoSaltarAlFinal();
+});
+
+devBtnIniciarViajeSim?.addEventListener('click', async () => {
+  if (!viajeActivoPasajero) return;
+  devBtnIniciarViajeSim.disabled = true;
+
+  // Si todavia estaba corriendo la simulacion de acercamiento al origen,
+  // la cortamos limpio antes de arrancar el tramo del viaje.
+  simAutoSaltarAlFinal();
+
+  const { error } = await supabase
+    .from('viajes')
+    .update({ estado: 'en_viaje' })
+    .eq('id', viajeActivoPasajero.id);
+
+  devBtnIniciarViajeSim.disabled = false;
+  if (error) {
+    console.error('[Sim] Error al iniciar el viaje simulado:', error);
+    return;
+  }
+
+  const origen = { lat: viajeActivoPasajero.origen_lat, lng: viajeActivoPasajero.origen_lng };
+  const puntos = [origen, ...paradas.map((p) => ({ lat: p.lat, lng: p.lng }))];
+  const telefono = viajeActivoPasajero.conductor_telefono;
+
+  simAutoIniciar(puntos, telefono, () => {
+    supabase.from('viajes').update({ estado: 'finalizado' }).eq('id', viajeActivoPasajero.id).then(({ error: errorFin }) => {
+      if (errorFin) console.error('[Sim] Error marcando el viaje como finalizado:', errorFin);
+    });
+  });
+});
 
 let devSimulacionFrameId = null;
 
