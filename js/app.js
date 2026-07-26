@@ -2474,6 +2474,20 @@ async function devMoverAutoA(lat, lng) {
 
   const heading = posicionConductor ? calcularRumbo(posicionConductor, { lat, lng }) : 0;
 
+  // FIX: antes esta pantalla dependia 100% de que Supabase Realtime le
+  // devolviera el dato (escribir -> Realtime -> aplicarNuevaPosicionConductor)
+  // para pintar cada punto. Con la simulacion mandando puntos cada 350ms,
+  // si esa vuelta se demoraba o llegaban varios de golpe, algunos puntos
+  // intermedios se perdian en el camino y se veia como un salto/TP. Ahora,
+  // si esta misma pestaña ya esta seguionde a este telefono, pintamos el
+  // punto de una directo en el mapa (sin esperar el viaje de ida y vuelta),
+  // y ADEMAS seguimos escribiendo en Supabase como antes, para que
+  // cualquier otro dispositivo real mirando a este conductor lo siga
+  // recibiendo por Realtime normalmente.
+  if (telefonoConductorSeguido === telefono) {
+    aplicarNuevaPosicionConductor({ lat, lng, heading });
+  }
+
   const { error } = await supabase
     .from('conductores')
     .update({ lat, lng, heading, actualizado_en: new Date().toISOString() })
