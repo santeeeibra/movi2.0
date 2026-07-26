@@ -1254,6 +1254,21 @@ function aplicarNuevaPosicionConductor(fix) {
     return;
   }
 
+  // FIX: cuando la simulacion local (simAutoIniciar) esta corriendo para
+  // el mismo telefono que esta pestaña sigue, esta funcion tambien se
+  // disparaba por el eco de Realtime (la simulacion escribe en Supabase
+  // 1 vez por segundo para que otros dispositivos reales la vean) —
+  // asi que dos animaciones distintas terminaban peleando por la misma
+  // posicion del auto: la simulacion local (fluida, 60 veces por
+  // segundo) contra esta funcion tratando de "suavizar" hacia un dato
+  // que en realidad ya estaba desactualizado en el momento de llegar,
+  // dando la sensacion de que el auto frena/acelera/retrocede. Mientras
+  // la simulacion local este activa para este mismo telefono, ella es
+  // la unica fuente de verdad visual — se ignora el eco de Realtime.
+  if (simAutoTelefono && telefonoConductorSeguido === simAutoTelefono) {
+    return;
+  }
+
   console.log('[Movi][debug-auto] Nueva posición recibida:', fix, '| ruta cargada:', Boolean(rutaGeometriaActual), '| capa auto-conductor existe:', Boolean(map.getSource('auto-conductor')));
 
   const proyeccion = rutaGeometriaActual
