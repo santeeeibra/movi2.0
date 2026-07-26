@@ -2314,8 +2314,21 @@ devBtnCrearViaje.addEventListener('click', async () => {
   const usuarioActual = cargarUsuario();
   const telefonoPasajero = usuarioActual ? usuarioActual.telefono : '5492920999999';
 
-  const conductor = await buscarConductorDisponible();
-  const datosConductor = datosConductorParaViaje(conductor, 'Conductor Test');
+  // FIX: antes se usaba buscarConductorDisponible(), que busca CUALQUIER
+  // conductor real marcado como disponible=true en la tabla "conductores".
+  // Si una persona real (ej. un conductor de verdad probando la app) queda
+  // disponible, el viaje de prueba le pisaba su telefono real, y la
+  // simulacion de movimiento del auto terminaba escribiendo posiciones
+  // falsas sobre su fila de conductor real. El panel de dev ahora usa
+  // SIEMPRE el conductor de prueba fijo, sembrado a mano en Supabase, para
+  // que las pruebas queden 100% aisladas de cualquier usuario real.
+  const datosConductor = {
+    nombre_conductor: 'Leyvan Esquercia',
+    conductor_telefono: TELEFONO_CONDUCTOR_PRUEBA,
+    patente_conductor: 'AB123CD',
+    modelo_auto_conductor: 'Toyota Corolla',
+    color_auto_conductor: 'Gris',
+  };
 
   const { data, error } = await supabase
     .from('viajes')
