@@ -1,0 +1,524 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Movi</title>
+
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#1F8A4C">
+
+<!-- Meta tags para instalar como PWA en iOS -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Movi">
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&display=swap" rel="stylesheet">
+
+<script src="https://api.mapbox.com/mapbox-gl-js/v3.1.0/mapbox-gl.js"></script>
+<link href="https://api.mapbox.com/mapbox-gl-js/v3.1.0/mapbox-gl.css" rel="stylesheet">
+
+<link rel="stylesheet" href="/css/styles.css">
+</head>
+<body>
+
+<div class="phone">
+  <div id="map"></div>
+
+  <div class="topbar">
+    <button class="icon-btn glass" id="btn-menu" aria-label="Menu">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+        <path d="M4 6h16M4 12h16M4 18h16"/>
+      </svg>
+    </button>
+    <button class="icon-btn glass" id="btn-perfil" aria-label="Perfil">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+        <circle cx="12" cy="8" r="3.4"/>
+        <path d="M5 20c1.5-4 4.2-6 7-6s5.5 2 7 6"/>
+      </svg>
+    </button>
+  </div>
+
+  <div class="origen-toast" id="origen-toast">
+    <div class="origen-toast-texto">Origen movido — confirmá antes de pedir el viaje</div>
+    <div class="origen-toast-btns">
+      <button class="origen-toast-btn confirmar" id="btn-confirmar-origen">Confirmar</button>
+      <button class="origen-toast-btn volver" id="btn-volver-ubicacion">Volver a mi ubicación</button>
+    </div>
+  </div>
+
+  <div class="sheet" id="sheet">
+    <div class="sheet-handle-zone"><div class="sheet-handle"></div></div>
+    <div class="sheet-title">¿A dónde vamos?</div>
+
+    <input class="search-input" id="search-input" type="text" placeholder="Buscar dirección o lugar...">
+
+    <div class="guardados-row">
+      <div class="guardado-chip" data-place="casa">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M3 11l9-7 9 7"/><path d="M5 10v10h14V10"/></svg>
+        Casa
+      </div>
+      <div class="guardado-chip" data-place="trabajo">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M9 21V9h6v12"/></svg>
+        Trabajo
+      </div>
+      <div class="guardado-chip" data-place="otros">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 2l3 6 6.5.9-4.7 4.6 1.1 6.5-5.9-3-5.9 3 1.1-6.5-4.7-4.6L9 8z"/></svg>
+        Otros
+      </div>
+      <div class="guardado-chip" id="btn-add-place" style="color:var(--verde-fuerte);">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+      </div>
+    </div>
+
+    <div class="section-label" id="results-label" style="display:none;">Resultados (máximo 3)</div>
+    <div class="results-list" id="results-list"></div>
+
+    <div class="paradas-actions" id="paradas-actions">
+      <button class="paradas-action-btn" id="btn-agregar-parada">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+        Agregar parada
+      </button>
+      <button class="paradas-action-btn" id="btn-modificar-destino" disabled>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s-7-6.2-7-11a7 7 0 0 1 14 0c0 4.8-7 11-7 11z"/><circle cx="12" cy="10" r="2.4"/></svg>
+        Modificar destino
+      </button>
+      <button class="paradas-action-btn" id="btn-ver-paradas" disabled>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 5v5h5"/><path d="M12 7v5l4 2"/></svg>
+        Ver paradas
+        <span class="paradas-count" id="paradas-count">0</span>
+      </button>
+    </div>
+
+    <div class="section-label">Tu viaje</div>
+    <div class="ride-row selected" data-ride="normal">
+      <div class="ride-icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 13l1.5-5A2 2 0 0 1 6.4 6.5h11.2a2 2 0 0 1 1.9 1.5L21 13"/><rect x="2.5" y="13" width="19" height="5.5" rx="1.5"/><circle cx="7" cy="18.5" r="1.6"/><circle cx="17" cy="18.5" r="1.6"/></svg>
+      </div>
+      <div>
+        <div class="ride-name">Viaje normal</div>
+        <div class="ride-sub" id="ride-sub-normal">Elegí un destino primero</div>
+      </div>
+      <div class="ride-price" id="ride-price-normal">$ —</div>
+    </div>
+    <div class="ride-row" data-ride="envios">
+      <div class="ride-icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8l-9-5-9 5 9 5 9-5z"/><path d="M3 8v8l9 5 9-5V8"/><path d="M12 13v8"/></svg>
+      </div>
+      <div>
+        <div class="ride-name">MOVI Envíos</div>
+        <div class="ride-sub">Enviar un paquete</div>
+      </div>
+      <div class="ride-price">$ 1.500</div>
+    </div>
+
+    <button class="cta" id="btn-pedir-viaje">
+      Pedir viaje
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+    </button>
+  </div>
+
+  <div class="buscando-overlay" id="buscando-overlay">
+    <div class="buscando-card">
+      <div class="spinner"></div>
+      <div class="buscando-titulo">Buscando conductor cercano...</div>
+      <button class="cancel-btn" id="btn-cancelar-busqueda">Cancelar</button>
+    </div>
+  </div>
+
+  <div class="sheet" id="driver-sheet" style="display:none;">
+    <div class="sheet-handle-zone"><div class="sheet-handle"></div></div>
+    <div class="sheet-title" style="margin-bottom:16px;">Conductor asignado</div>
+
+    <div class="driver-card">
+      <div class="driver-avatar">L</div>
+      <div>
+        <div class="driver-name">Leyvan Esquercia</div>
+        <div class="driver-car">Toyota Corolla</div>
+        <div class="driver-rating">
+          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l3 6 6.5.9-4.7 4.6 1.1 6.5-5.9-3-5.9 3 1.1-6.5-4.7-4.6L9 8z"/></svg>
+          4.9
+        </div>
+      </div>
+    </div>
+
+    <div class="status-row">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s-7-6.2-7-11a7 7 0 0 1 14 0c0 4.8-7 11-7 11z"/><circle cx="12" cy="10" r="2.4"/></svg>
+      El conductor va en camino
+    </div>
+
+    <div class="eta-chips">
+      <div class="eta-chip">0.2 km</div>
+      <div class="eta-chip">2 min</div>
+    </div>
+
+    <div class="contact-row">
+      <button class="contact-btn" id="btn-llamar">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6 19.8 19.8 0 0 1-3.1-8.7A2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1.9.3 1.8.6 2.7a2 2 0 0 1-.5 2.1L8 9.7a16 16 0 0 0 6 6l1.2-1.2a2 2 0 0 1 2.1-.5c.9.3 1.8.5 2.7.6a2 2 0 0 1 1.7 2z"/></svg>
+        Llamar
+      </button>
+      <button class="contact-btn" id="btn-chatear">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+        Chatear
+      </button>
+    </div>
+
+    <button class="cancel-btn" id="btn-cancelar-viaje">Cancelar</button>
+    <button class="dev-sim-btn" id="btn-simular-fin">Simular fin de viaje</button>
+  </div>
+
+  <div class="sheet" id="payment-sheet" style="display:none;">
+    <div class="sheet-handle-zone"><div class="sheet-handle"></div></div>
+
+    <div class="payment-step" id="payment-step-1">
+      <div class="payment-icon-check">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>
+      </div>
+      <div class="payment-title">Viaje completado</div>
+      <div class="payment-subtitle" id="payment-driver-sub">Con el conductor</div>
+
+      <div class="total-row">
+        <span>Total del viaje</span>
+        <span class="total-amount" id="payment-total">$ 2.000</span>
+      </div>
+
+      <div class="section-label">Metodo de pago</div>
+      <div class="metodo-row">
+        <div class="metodo-chip selected" data-metodo="efectivo">Efectivo</div>
+        <div class="metodo-chip" data-metodo="transferencia">Transferencia</div>
+      </div>
+
+      <div class="alias-card" id="alias-card" style="display:none;">
+        <div class="alias-label">Alias para transferir</div>
+        <div class="alias-value">movi.viedma.pagos</div>
+      </div>
+
+      <button class="cta" id="btn-confirmar-pago">Confirmar pago</button>
+    </div>
+
+    <div class="payment-step" id="payment-step-2" style="display:none;">
+      <div class="payment-title">¿Como estuvo tu viaje?</div>
+      <div class="payment-subtitle" id="rating-driver-sub">Con el conductor</div>
+
+      <div class="stars-row" id="stars-row">
+        <svg class="star active" data-index="1" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l3 6 6.5.9-4.7 4.6 1.1 6.5-5.9-3-5.9 3 1.1-6.5-4.7-4.6L9 8z"/></svg>
+        <svg class="star active" data-index="2" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l3 6 6.5.9-4.7 4.6 1.1 6.5-5.9-3-5.9 3 1.1-6.5-4.7-4.6L9 8z"/></svg>
+        <svg class="star active" data-index="3" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l3 6 6.5.9-4.7 4.6 1.1 6.5-5.9-3-5.9 3 1.1-6.5-4.7-4.6L9 8z"/></svg>
+        <svg class="star active" data-index="4" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l3 6 6.5.9-4.7 4.6 1.1 6.5-5.9-3-5.9 3 1.1-6.5-4.7-4.6L9 8z"/></svg>
+        <svg class="star active" data-index="5" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l3 6 6.5.9-4.7 4.6 1.1 6.5-5.9-3-5.9 3 1.1-6.5-4.7-4.6L9 8z"/></svg>
+      </div>
+
+      <textarea class="comment-input" id="comment-input" placeholder="Dejá un comentario (opcional)"></textarea>
+
+      <button class="cta" id="btn-enviar-calificacion">Enviar calificacion</button>
+    </div>
+  </div>
+
+  <!-- ================================================================ -->
+  <!--  Ver todas las paradas: lista con orden, direccion y eliminar    -->
+  <!-- ================================================================ -->
+  <div class="paradas-overlay" id="paradas-overlay">
+    <div class="paradas-panel">
+      <div class="paradas-panel-header">
+        <div class="paradas-panel-title">Paradas del viaje</div>
+        <button class="icon-btn drawer-close" id="btn-cerrar-paradas" aria-label="Cerrar">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        </button>
+      </div>
+      <div class="paradas-panel-list" id="paradas-panel-list"></div>
+    </div>
+  </div>
+
+  <div class="drawer-overlay" id="drawer-overlay"></div>
+
+  <div class="drawer drawer-left" id="menu-drawer">
+    <div class="drawer-header">
+      <div class="drawer-title">Menu</div>
+      <button class="icon-btn drawer-close" id="btn-cerrar-menu" aria-label="Cerrar">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+      </button>
+    </div>
+
+    <div class="drawer-section-label">Navegacion</div>
+    <div class="drawer-item" data-item="historial">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 5v5h5"/><path d="M12 7v5l4 2"/></svg>
+      Historial de viajes
+    </div>
+    <div class="drawer-item" data-item="configuracion">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+      Configuracion
+    </div>
+    <div class="drawer-item" data-item="soporte">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 2-3 4"/><path d="M12 17h.01"/></svg>
+      Soporte
+    </div>
+
+    <div class="drawer-section-label">Cuenta</div>
+    <div class="drawer-item drawer-item-danger" data-item="cerrar-sesion">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/></svg>
+      Cerrar sesion
+    </div>
+  </div>
+
+  <div class="login-overlay" id="login-overlay">
+    <div class="login-sheet">
+      <div class="login-logo">M</div>
+      <div class="login-title">Bienvenido a Movi</div>
+      <div class="login-subtitle">Ingresá tus datos para empezar</div>
+
+      <div class="login-field">
+        <label class="login-label" for="login-nombre">Nombre</label>
+        <input class="login-input" id="login-nombre" type="text" placeholder="Tu nombre" autocomplete="name">
+        <div class="login-error" id="login-error-nombre"></div>
+      </div>
+
+      <div class="login-field">
+        <label class="login-label" for="login-telefono">Número de WhatsApp</label>
+        <input class="login-input" id="login-telefono" type="tel" placeholder="Ej: 5492920605208" autocomplete="tel">
+        <div class="login-error" id="login-error-telefono"></div>
+      </div>
+
+      <button class="cta" id="btn-login-continuar">
+        Continuar
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+      </button>
+
+      <div class="login-terms">Al continuar aceptás nuestros Términos y condiciones</div>
+    </div>
+  </div>
+
+  <!-- ================================================================ -->
+  <!--  Role selection: Pasajero / Conductor (shown when no rol in LS)  -->
+  <!-- ================================================================ -->
+  <div class="login-overlay" id="role-select-overlay">
+    <div class="login-sheet" style="text-align:center;">
+      <div class="login-logo">M</div>
+      <div class="login-title">Bienvenido a Movi</div>
+      <div class="login-subtitle">Elegí tu rol para continuar</div>
+
+      <button class="cta" id="btn-soy-pasajero" style="margin-bottom:10px;">
+        Soy Pasajero
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+      </button>
+
+      <button class="cta" id="btn-soy-conductor" style="background:transparent;color:var(--negro);border:1.5px solid rgba(20,23,26,0.2);">
+        Soy Conductor
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+      </button>
+    </div>
+  </div>
+
+  <!-- ================================================================ -->
+  <!--  Conductor registration form (shown after "Soy Conductor")       -->
+  <!-- ================================================================ -->
+  <div class="login-overlay" id="conductor-form-overlay">
+    <div class="login-sheet">
+      <div class="login-logo">M</div>
+      <div class="login-title">Registro Conductor</div>
+      <div class="login-subtitle">Completá tus datos para empezar</div>
+
+      <div class="login-field">
+        <label class="login-label" for="conductor-nombre">Nombre y apellido</label>
+        <input class="login-input" id="conductor-nombre" type="text" placeholder="Ej: Juan Pérez" autocomplete="name" />
+      </div>
+
+      <div class="login-field">
+        <label class="login-label" for="conductor-telefono">WhatsApp</label>
+        <input class="login-input" id="conductor-telefono" type="tel" placeholder="Ej: 5492920123456" autocomplete="tel" />
+      </div>
+
+      <div class="login-field">
+        <label class="login-label" for="conductor-patente">Patente</label>
+        <input class="login-input" id="conductor-patente" type="text" placeholder="Ej: AB123CD" />
+      </div>
+
+      <div class="login-field">
+        <label class="login-label" for="conductor-modelo">Modelo del auto</label>
+        <input class="login-input" id="conductor-modelo" type="text" placeholder="Ej: Corolla" />
+      </div>
+
+      <div class="login-field">
+        <label class="login-label" for="conductor-color">Color del auto</label>
+        <input class="login-input" id="conductor-color" type="text" placeholder="Ej: Gris" />
+      </div>
+
+      <button class="cta" id="btn-guardar-conductor">
+        Ingresar
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+      </button>
+
+      <div class="conductor-msg" id="conductor-msg" style="font-size:13px;font-weight:700;text-align:center;margin-top:14px;min-height:20px;"></div>
+    </div>
+  </div>
+
+  <!-- ================================================================ -->
+  <!--  Driver waiting screen (after conductor registers / reconnects)  -->
+  <!-- ================================================================ -->
+  <div class="login-overlay" id="driver-waiting-overlay">
+    <div class="login-sheet" style="text-align:center;">
+      <div class="login-logo">M</div>
+      <div class="login-title">Esperando viajes...</div>
+      <div class="spinner" style="margin:30px auto 10px;"></div>
+    </div>
+  </div>
+
+  <!-- ================================================================ -->
+  <!--  Boton flotante: centrar mapa segun el momento del viaje          -->
+  <!-- ================================================================ -->
+  <button class="center-floating-btn" id="btn-centrar-mapa" aria-label="Centrar mapa">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="12" cy="12" r="7"/>
+      <line x1="22" y1="12" x2="18" y2="12"/>
+      <line x1="6" y1="12" x2="2" y2="12"/>
+      <line x1="12" y1="6" x2="12" y2="2"/>
+      <line x1="12" y1="22" x2="12" y2="18"/>
+    </svg>
+  </button>
+
+  <!-- ================================================================ -->
+  <!--  Dev / Admin floating button (only visible in admin mode)         -->
+  <!-- ================================================================ -->
+  <button class="dev-floating-btn" id="dev-floating-btn" aria-label="Dev panel">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/>
+    </svg>
+  </button>
+
+  <!-- ================================================================ -->
+  <!--  Dev / Admin panel                                               -->
+  <!-- ================================================================ -->
+  <div class="dev-panel-overlay" id="dev-panel-overlay">
+    <div class="dev-panel" id="dev-panel">
+      <div class="dev-panel-header">
+        <span class="dev-panel-title">🛠 Panel de Desarrollador</span>
+        <button class="dev-panel-close" id="dev-panel-close" aria-label="Cerrar">&times;</button>
+      </div>
+
+      <!-- 1. Cambiar teléfono de prueba -->
+      <div class="dev-card">
+        <div class="dev-card-title">📞 Cambiar teléfono de prueba</div>
+        <div class="dev-card-body">
+          <input class="dev-input" id="dev-telefono-input" type="tel" placeholder="Ej: 5492920123456" />
+          <button class="dev-btn" id="dev-btn-telefono">Aplicar</button>
+        </div>
+        <div class="dev-feedback" id="dev-feedback-telefono"></div>
+      </div>
+
+      <!-- 2. Simular viaje completo -->
+      <div class="dev-card">
+        <div class="dev-card-title">🚗 Simular viaje completo</div>
+        <div class="dev-card-body">
+          <button class="dev-btn" id="dev-btn-crear-viaje">Crear viaje de prueba</button>
+          <select class="dev-btn" id="dev-select-estado" disabled>
+            <option value="pendiente">pendiente</option>
+            <option value="conductor_asignado">conductor_asignado</option>
+            <option value="en_camino">en_camino</option>
+            <option value="llegó">llegó</option>
+            <option value="en_viaje">en_viaje</option>
+            <option value="finalizado">finalizado</option>
+          </select>
+          <span class="dev-badge" id="dev-badge-estado">—</span>
+        </div>
+        <div class="dev-feedback" id="dev-feedback-viaje"></div>
+      </div>
+
+      <!-- 2b. Teleportar el auto del conductor tocando el mapa -->
+      <div class="dev-card">
+        <div class="dev-card-title">🚕 Mover auto del conductor</div>
+        <div class="dev-card-body">
+          <button class="dev-btn" id="dev-btn-mover-auto">Activar: tocar el mapa mueve el auto</button>
+        </div>
+        <div class="dev-feedback" id="dev-feedback-mover-auto"></div>
+      </div>
+
+      <!-- 3. Ver estado crudo del viaje -->
+      <div class="dev-card">
+        <div class="dev-card-title">📋 Ver estado crudo del viaje</div>
+        <div class="dev-card-body">
+          <pre class="dev-json" id="dev-json-viaje">Sin viaje activo</pre>
+        </div>
+      </div>
+
+      <!-- 4. Resetear datos de prueba -->
+      <div class="dev-card">
+        <div class="dev-card-title">🗑 Resetear datos de prueba</div>
+        <div class="dev-card-body">
+          <button class="dev-btn dev-btn-danger" id="dev-btn-resetear">Borrar todos los viajes de prueba</button>
+        </div>
+        <div class="dev-feedback" id="dev-feedback-reset"></div>
+      </div>
+
+      <!-- 5. Forzar cancelación -->
+      <div class="dev-card">
+        <div class="dev-card-title">⛔ Forzar cancelación</div>
+        <div class="dev-card-body">
+          <button class="dev-btn dev-btn-danger" id="dev-btn-cancelar">Cancelar viaje activo</button>
+        </div>
+        <div class="dev-feedback" id="dev-feedback-cancelar"></div>
+      </div>
+
+    </div>
+  </div>
+
+  <div class="drawer drawer-right" id="perfil-drawer">
+    <div class="drawer-header">
+      <div class="drawer-title">Perfil</div>
+      <button class="icon-btn drawer-close" id="btn-cerrar-perfil" aria-label="Cerrar">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+      </button>
+    </div>
+
+    <div class="perfil-card">
+      <div class="driver-avatar">S</div>
+      <div>
+        <div class="driver-name">Santiago Gutierrez</div>
+        <div class="perfil-email">santi@ejemplo.com</div>
+        <div class="driver-rating">
+          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l3 6 6.5.9-4.7 4.6 1.1 6.5-5.9-3-5.9 3 1.1-6.5-4.7-4.6L9 8z"/></svg>
+          4.8
+        </div>
+      </div>
+    </div>
+
+    <div class="drawer-section-label">Lugares guardados</div>
+    <div class="guardados-row">
+      <div class="guardado-chip" data-item="casa">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M3 11l9-7 9 7"/><path d="M5 10v10h14V10"/></svg>
+        Casa
+      </div>
+      <div class="guardado-chip" data-item="trabajo">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M9 21V9h6v12"/></svg>
+        Trabajo
+      </div>
+      <div class="guardado-chip" data-item="otros">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 2l3 6 6.5.9-4.7 4.6 1.1 6.5-5.9-3-5.9 3 1.1-6.5-4.7-4.6L9 8z"/></svg>
+        Otros
+      </div>
+    </div>
+
+    <div class="drawer-section-label">Preferencias</div>
+    <div class="drawer-item" data-item="notificaciones">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg>
+      Notificaciones
+    </div>
+    <div class="drawer-item" data-item="metodos-pago">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20"/></svg>
+      Metodos de pago
+    </div>
+    <div class="drawer-item" data-item="promociones">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.6 12.6l-8.9 8.9a2 2 0 0 1-2.8 0l-6.4-6.4a2 2 0 0 1 0-2.8l8.9-8.9a2 2 0 0 1 1.4-.6H19a2 2 0 0 1 2 2v6.4a2 2 0 0 1-.4 1.4z"/><circle cx="14.5" cy="8.5" r="1.5"/></svg>
+      Promociones
+    </div>
+
+    <div class="drawer-item drawer-item-danger" data-item="cerrar-sesion" style="margin-top:8px;">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/></svg>
+      Cerrar sesion
+    </div>
+  </div>
+</div>
+
+<script type="module" src="/js/app.js"></script>
+</body>
+</html>
