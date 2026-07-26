@@ -967,6 +967,33 @@ function iniciarSupervisionViajeConductor(telefono) {
     .subscribe();
 }
 
+// FIX (mismo motivo que del lado del pasajero): si el celular del
+// conductor se puso en reposo, el navegador puede cortar la conexion en
+// tiempo real sin avisar — por ejemplo, si el pasajero cancela justo en
+// ese momento, el conductor nunca se entera. Al volver a la pestaña,
+// chequeamos a mano si su viaje activo sigue igual.
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible') return;
+  if (!conductorTelefonoActual) return;
+
+  supabase
+    .from('viajes')
+    .select('*')
+    .eq('conductor_telefono', conductorTelefonoActual)
+    .not('estado', 'in', '(pendiente,finalizado,cancelado)')
+    .order('creado_en', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+    .then(({ data: viajeReal, error }) => {
+      if (error) return;
+      // Si el viaje real que deberia estar activo cambio (o desaparecio)
+      // respecto a lo que teniamos en pantalla, nos ponemos al dia.
+      if ((viajeReal?.id) !== (conductorViajeActivo?.id) || (viajeReal?.estado) !== (conductorViajeActivo?.estado)) {
+        evaluarViajeConductor(viajeReal, conductorTelefonoActual);
+      }
+    });
+});
+
 const VIEDMA_CENTER = [-62.9961, -40.8125];
 
 // Chequeo de conexion a Supabase (por ahora solo console.log, todavia no
@@ -1908,69 +1935,122 @@ document.getElementById('btn-pedir-viaje').addEventListener('click', async () =>
     .on(
       'postgres_changes',
       { event: 'UPDATE', schema: 'public', table: 'viajes', filter: `id=eq.${viaje.id}` },
-      (payload) => {
-        const actualizado = payload.new;
-        const estadoAnterior = viajeActivoPasajero?.estado;
-        viajeActivoPasajero = actualizado;
-        sincronizarCapaAutoConductor();
-
-        if (actualizado.estado === 'conductor_asignado' && actualizado.conductor_telefono && estadoAnterior !== 'conductor_asignado') {
-          buscandoOverlay.classList.remove('show');
-          sheet.style.display = 'none';
-          driverSheet.style.display = 'block';
-          aplicarDatosConductorEnSheet(actualizado);
-          actualizarControlesDevEnViaje();
-          mostrarToast(`${actualizado.nombre_conductor || 'Tu conductor'} está en camino 🚗`, '🚗');
-
-          // En modo admin (testing), como no hay un conductor real
-          // mandando su GPS, arrancamos nosotros mismos una simulacion de
-          // acercamiento hacia el origen real de este viaje, para poder
-          // seguir probando el resto de las pantallas sin depender de un
-          // segundo dispositivo.
-          if (esAdmin()) {
-            const puntoPartida = {
-              lat: actualizado.origen_lat - 0.0055,
-              lng: actualizado.origen_lng - 0.0005,
-            };
-            simAutoIniciar(
-              [puntoPartida, { lat: actualizado.origen_lat, lng: actualizado.origen_lng }],
-              actualizado.conductor_telefono,
-              null,
-            );
-          }
-        } else if (actualizado.estado === 'llegó' && estadoAnterior !== 'llegó') {
-          mostrarToast('Tu conductor llegó al punto de encuentro 📍', '📍');
-          actualizarControlesDevEnViaje();
-        } else if (actualizado.estado === 'en_viaje' && estadoAnterior !== 'en_viaje') {
-          mostrarToast('Viaje iniciado — ¡buen viaje! ▶️', '▶️');
-          actualizarControlesDevEnViaje();
-        } else if (actualizado.estado === 'cancelado') {
-          mostrarToast('El viaje fue cancelado ❌', '❌');
-          buscandoOverlay.classList.remove('show');
-          viajeActivoPasajero = null;
-          simAutoDetener();
-          if (canalEsperaAsignacion) {
-            supabase.removeChannel(canalEsperaAsignacion);
-            canalEsperaAsignacion = null;
-          }
-        } else if (actualizado.estado === 'finalizado') {
-          mostrarToast('Viaje finalizado ✅', '✅');
-          driverSheet.style.display = 'none';
-          resetPaymentSheet();
-          paymentSheet.style.display = 'block';
-          paymentSheet.classList.remove('collapsed');
-          simAutoDetener();
-          if (canalEsperaAsignacion) {
-            supabase.removeChannel(canalEsperaAsignacion);
-            canalEsperaAsignacion = null;
-          }
-        } else {
-          actualizarControlesDevEnViaje();
-        }
-      },
+      (payload) => procesarActualizacionViajePasajero(payload.new),
     )
     .subscribe();
+
+  // FIX: condicion de carrera — si el conductor acepta el viaje en el
+  // instante justo en que esta suscripcion todavia se estaba terminando
+  // de establecer (el .subscribe() de arriba es asincronico "por dentro":
+  // toma un ratito conectar el websocket de verdad), el pasajero se podia
+  // perder ese aviso para siempre, quedando en "Buscando conductor..."
+  // sin que nada le llegara nunca (el conductor, del otro lado, no
+  // depende de este aviso para avanzar, por eso a el si le funcionaba).
+  // Como red de seguridad, apenas se pide la suscripcion, tambien
+  // consultamos una vez de una el estado actual real del viaje — si ya
+  // habia cambiado antes de que la suscripcion quedara lista, lo
+  // agarramos igual aca.
+  supabase
+    .from('viajes')
+    .select('*')
+    .eq('id', viaje.id)
+    .single()
+    .then(({ data: viajeActual, error: errorViajeActual }) => {
+      if (errorViajeActual || !viajeActual) return;
+      if (viajeActual.estado !== 'pendiente') {
+        procesarActualizacionViajePasajero(viajeActual);
+      }
+    });
 });
+
+// Toda la logica de reaccionar a un cambio de estado del viaje del
+// pasajero, en una funcion aparte para poder llamarla tanto desde el
+// evento de Realtime como desde el chequeo manual de respaldo (arriba, y
+// tambien el listener de "volvi a la pestaña" mas abajo).
+function procesarActualizacionViajePasajero(actualizado) {
+  const estadoAnterior = viajeActivoPasajero?.estado;
+  viajeActivoPasajero = actualizado;
+  sincronizarCapaAutoConductor();
+
+  if (actualizado.estado === 'conductor_asignado' && actualizado.conductor_telefono && estadoAnterior !== 'conductor_asignado') {
+    buscandoOverlay.classList.remove('show');
+    sheet.style.display = 'none';
+    driverSheet.style.display = 'block';
+    aplicarDatosConductorEnSheet(actualizado);
+    actualizarControlesDevEnViaje();
+    mostrarToast(`${actualizado.nombre_conductor || 'Tu conductor'} está en camino 🚗`, '🚗');
+
+    // En modo admin (testing), como no hay un conductor real
+    // mandando su GPS, arrancamos nosotros mismos una simulacion de
+    // acercamiento hacia el origen real de este viaje, para poder
+    // seguir probando el resto de las pantallas sin depender de un
+    // segundo dispositivo.
+    if (esAdmin()) {
+      const puntoPartida = {
+        lat: actualizado.origen_lat - 0.0055,
+        lng: actualizado.origen_lng - 0.0005,
+      };
+      simAutoIniciar(
+        [puntoPartida, { lat: actualizado.origen_lat, lng: actualizado.origen_lng }],
+        actualizado.conductor_telefono,
+        null,
+      );
+    }
+  } else if (actualizado.estado === 'llegó' && estadoAnterior !== 'llegó') {
+    mostrarToast('Tu conductor llegó al punto de encuentro 📍', '📍');
+    actualizarControlesDevEnViaje();
+  } else if (actualizado.estado === 'en_viaje' && estadoAnterior !== 'en_viaje') {
+    mostrarToast('Viaje iniciado — ¡buen viaje! ▶️', '▶️');
+    actualizarControlesDevEnViaje();
+  } else if (actualizado.estado === 'cancelado' && estadoAnterior !== 'cancelado') {
+    mostrarToast('El viaje fue cancelado ❌', '❌');
+    buscandoOverlay.classList.remove('show');
+    viajeActivoPasajero = null;
+    simAutoDetener();
+    if (canalEsperaAsignacion) {
+      supabase.removeChannel(canalEsperaAsignacion);
+      canalEsperaAsignacion = null;
+    }
+  } else if (actualizado.estado === 'finalizado' && estadoAnterior !== 'finalizado') {
+    mostrarToast('Viaje finalizado ✅', '✅');
+    driverSheet.style.display = 'none';
+    resetPaymentSheet();
+    paymentSheet.style.display = 'block';
+    paymentSheet.classList.remove('collapsed');
+    simAutoDetener();
+    if (canalEsperaAsignacion) {
+      supabase.removeChannel(canalEsperaAsignacion);
+      canalEsperaAsignacion = null;
+    }
+  } else {
+    actualizarControlesDevEnViaje();
+  }
+}
+
+// FIX: si el celular se puso en reposo (pantalla bloqueada) mientras se
+// esperaba, el navegador puede cortar la conexion en tiempo real sin
+// avisar. Cuando la pestaña vuelve a estar visible, chequeamos a mano el
+// estado real del viaje activo por si nos perdimos algun cambio mientras
+// tanto — asi nunca queda la pantalla "colgada" esperando un aviso que
+// ya paso.
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible') return;
+  if (!viajeActivoPasajero || !viajeActivoPasajero.id) return;
+
+  supabase
+    .from('viajes')
+    .select('*')
+    .eq('id', viajeActivoPasajero.id)
+    .single()
+    .then(({ data: viajeActual, error }) => {
+      if (error || !viajeActual) return;
+      if (viajeActual.estado !== viajeActivoPasajero.estado) {
+        procesarActualizacionViajePasajero(viajeActual);
+      }
+    });
+});
+
+
 
 document.getElementById('btn-cancelar-busqueda').addEventListener('click', async () => {
   buscandoOverlay.classList.remove('show');
