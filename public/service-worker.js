@@ -38,6 +38,18 @@ self.addEventListener('fetch', (event) => {
         caches.open(CACHE_VERSION).then((cache) => cache.put(request, copia));
         return respuesta;
       })
-      .catch(() => caches.match(request)),
+      .catch(() => caches.match(request).then((cacheada) => {
+        // FIX: caches.match() devuelve undefined si no hay nada guardado
+        // para esta URL todavia (ej: primera visita sin conexion). Devolver
+        // undefined desde respondWith() rompe el fetch entero con
+        // "Failed to convert value to 'Response'" — hay que devolver SIEMPRE
+        // un Response real, aunque sea una de error generica.
+        if (cacheada) return cacheada;
+        return new Response('Sin conexión y sin version en cache todavia.', {
+          status: 503,
+          statusText: 'Offline',
+          headers: { 'Content-Type': 'text/plain; charset=utf-8' },
+        });
+      })),
   );
 });
