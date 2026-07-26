@@ -279,7 +279,7 @@
 
       <div class="login-field">
         <label class="login-label" for="login-telefono">Número de WhatsApp</label>
-        <input class="login-input" id="login-telefono" type="tel" placeholder="Ej: 5492920605208" autocomplete="tel">
+        <input class="login-input" id="login-telefono" type="text" placeholder="Ej: 5492920605208" autocomplete="tel">
         <div class="login-error" id="login-error-telefono"></div>
       </div>
 
@@ -332,7 +332,7 @@
 
       <div class="login-field">
         <label class="login-label" for="conductor-telefono">WhatsApp</label>
-        <input class="login-input" id="conductor-telefono" type="tel" placeholder="Ej: 5492920123456" autocomplete="tel" />
+        <input class="login-input" id="conductor-telefono" type="text" placeholder="Ej: 5492920123456" autocomplete="tel" />
       </div>
 
       <div class="login-field">
@@ -450,7 +450,7 @@
       <div class="dev-card">
         <div class="dev-card-title">📞 Cambiar teléfono de prueba</div>
         <div class="dev-card-body">
-          <input class="dev-input" id="dev-telefono-input" type="tel" placeholder="Ej: 5492920123456" />
+          <input class="dev-input" id="dev-telefono-input" type="text" placeholder="Ej: 5492920123456" />
           <button class="dev-btn" id="dev-btn-telefono">Aplicar</button>
         </div>
         <div class="dev-feedback" id="dev-feedback-telefono"></div>
@@ -481,6 +481,17 @@
           <button class="dev-btn" id="dev-btn-mover-auto">Activar: tocar el mapa mueve el auto</button>
         </div>
         <div class="dev-feedback" id="dev-feedback-mover-auto"></div>
+      </div>
+
+      <!-- 2c. Simular el recorrido automatico del auto por la ruta -->
+      <div class="dev-card">
+        <div class="dev-card-title">🛣️ Simular recorrido automático</div>
+        <div class="dev-card-body" style="display:flex; flex-direction:column; gap:8px;">
+          <button class="dev-btn" id="dev-btn-simular-origen">Simular llegada al origen</button>
+          <button class="dev-btn" id="dev-btn-simular-destino">Simular viaje al destino (con paradas)</button>
+          <button class="dev-btn dev-btn-danger" id="dev-btn-detener-simulacion">Detener simulación</button>
+        </div>
+        <div class="dev-feedback" id="dev-feedback-simulacion"></div>
       </div>
 
       <!-- 3. Ver estado crudo del viaje -->

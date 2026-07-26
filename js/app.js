@@ -2436,6 +2436,97 @@ async function devMoverAutoA(lat, lng) {
 }
 
 // ==================================================================
+//  2c. SIMULAR RECORRIDO AUTOMÁTICO (sin caminar de verdad con el celu)
+//  Calcula una ruta real con getRuta() y va escribiendo puntos de esa
+//  geometria, uno por uno, en la tabla "conductores" (mismo mecanismo que
+//  el click-en-el-mapa de arriba) — asi se ve el auto moviendose solo por
+//  la ruta y enganchado a la calle, sin que nadie tenga que caminar con
+//  el telefono en la mano para probarlo.
+// ==================================================================
+const devBtnSimularOrigen = document.getElementById('dev-btn-simular-origen');
+const devBtnSimularDestino = document.getElementById('dev-btn-simular-destino');
+const devBtnDetenerSimulacion = document.getElementById('dev-btn-detener-simulacion');
+const devFeedbackSimulacion = document.getElementById('dev-feedback-simulacion');
+
+// Punto de partida ficticio, unas cuadras al sur del origen de prueba, para
+// simular que el conductor viene acercandose desde algun lado.
+const TEST_PUNTO_PARTIDA = { lat: -40.8175, lng: -62.9955 };
+
+let devSimulacionIntervalId = null;
+
+function devDetenerSimulacion(mensaje) {
+  if (devSimulacionIntervalId) {
+    clearInterval(devSimulacionIntervalId);
+    devSimulacionIntervalId = null;
+  }
+  if (mensaje) devMostrarFeedback(devFeedbackSimulacion, mensaje);
+}
+
+async function devSimularRecorrido(puntos, textoOk) {
+  devDetenerSimulacion();
+  devMostrarFeedback(devFeedbackSimulacion, 'Calculando ruta...');
+
+  const ruta = await getRuta(puntos);
+  if (!ruta || !ruta.geometry?.coordinates?.length) {
+    devMostrarFeedback(devFeedbackSimulacion, 'No se pudo calcular la ruta ❌', true);
+    return;
+  }
+
+  // Tambien la dibujamos en el mapa (mismo source que usa el resto de la
+  // app), asi se ve la linea ademas del auto moviendose sobre ella.
+  if (map.getSource('ruta')) {
+    map.getSource('ruta').setData({ type: 'Feature', properties: {}, geometry: ruta.geometry });
+  }
+  rutaGeometriaActual = ruta.geometry.coordinates;
+  window._iniciarAnimacionGlow?.();
+
+  const coords = ruta.geometry.coordinates; // [[lng,lat], ...]
+  const pasosDeseados = 35; // cuantas actualizaciones de posicion mandamos en total
+  const salto = Math.max(1, Math.floor(coords.length / pasosDeseados));
+  let i = 0;
+
+  devMostrarFeedback(devFeedbackSimulacion, 'Simulando... 🚗');
+
+  devSimulacionIntervalId = setInterval(async () => {
+    if (i >= coords.length) {
+      devDetenerSimulacion(textoOk);
+      return;
+    }
+    const [lng, lat] = coords[i];
+    await devMoverAutoA(lat, lng);
+    i += salto;
+  }, 700); // similar al intervalo real entre actualizaciones de GPS
+}
+
+devBtnSimularOrigen.addEventListener('click', () => {
+  devSimularRecorrido([TEST_PUNTO_PARTIDA, TEST_ORIGEN], 'Auto llegó al origen ✅');
+});
+
+devBtnSimularDestino.addEventListener('click', async () => {
+  // Si el viaje de prueba tiene paradas cargadas (tabla "paradas"), la ruta
+  // pasa por todas en orden; si no, va directo origen -> destino de prueba.
+  let puntos = [TEST_ORIGEN, TEST_DESTINO];
+
+  if (devViajeActivo) {
+    const { data: paradasViaje } = await supabase
+      .from('paradas')
+      .select('*')
+      .eq('viaje_id', devViajeActivo.id)
+      .order('orden', { ascending: true });
+
+    if (paradasViaje && paradasViaje.length > 0) {
+      puntos = [TEST_ORIGEN, ...paradasViaje.map((p) => ({ lat: p.lat, lng: p.lng }))];
+    }
+  }
+
+  devSimularRecorrido(puntos, 'Auto llegó al destino ✅');
+});
+
+devBtnDetenerSimulacion.addEventListener('click', () => {
+  devDetenerSimulacion('Simulación detenida');
+});
+
+// ==================================================================
 //  3. VER ESTADO CRUDO DEL VIAJE (en vivo, vía Realtime)
 // ==================================================================
 
