@@ -205,6 +205,37 @@ function mostrarOverlay(el) {
   if (el) el.classList.add('show');
 }
 
+// ==================================================================
+//  Notificaciones dentro de la app — reemplaza lo que iba a ser un
+//  aviso por WhatsApp (conductor asignado, llego, viaje iniciado,
+//  finalizado, cancelado, nuevo viaje disponible para el conductor).
+//  Se apilan una a la vez: si llega una nueva mientras se esta
+//  mostrando otra, se corta la anterior y se muestra la nueva.
+// ==================================================================
+const appToast = document.getElementById('app-toast');
+const appToastIcon = document.getElementById('app-toast-icon');
+const appToastTexto = document.getElementById('app-toast-texto');
+let appToastTimeoutId = null;
+
+function mostrarToast(texto, icono = '🔔', duracionMs = 4500) {
+  if (appToastTimeoutId) {
+    clearTimeout(appToastTimeoutId);
+    appToastTimeoutId = null;
+  }
+
+  appToast.classList.remove('hiding');
+  appToastIcon.textContent = icono;
+  appToastTexto.textContent = texto;
+  appToast.classList.add('show');
+
+  appToastTimeoutId = setTimeout(() => {
+    appToast.classList.add('hiding');
+    setTimeout(() => {
+      appToast.classList.remove('show', 'hiding');
+    }, 250);
+  }, duracionMs);
+}
+
 function ocultarLoginYApp() {
   // Hide map UI elements when showing role screens
   inicioMapa = true; // prevent map init if we're going to show something else
@@ -624,7 +655,12 @@ function iniciarListaPendientes() {
     .on(
       'postgres_changes',
       { event: '*', schema: 'public', table: 'viajes', filter: 'estado=eq.pendiente' },
-      () => refrescarListaPendientes(),
+      (payload) => {
+        if (payload.eventType === 'INSERT') {
+          mostrarToast('Nuevo viaje disponible cerca tuyo 🔔', '🔔');
+        }
+        refrescarListaPendientes();
+      },
     )
     .subscribe();
 }
@@ -865,6 +901,11 @@ function evaluarViajeConductor(viaje, telefono) {
   } else {
     detenerTrackingConductor();
     if (conductorViajeActivo) {
+      // Si el conductor mismo lo finalizo (toco "Finalizar viaje"), ya lo
+      // sabe — el aviso es solo para cuando se entera de una cancelacion.
+      if (viaje && viaje.estado === 'cancelado') {
+        mostrarToast('El pasajero canceló el viaje ❌', '❌');
+      }
       salirDeVistaViajeActiva();
     }
   }
@@ -1088,12 +1129,6 @@ function sincronizarCapaAutoConductor() {
   const telefono = viajeActivoPasajero?.conductor_telefono;
   const activo = Boolean(telefono) && ESTADOS_VIAJE_CON_AUTO_VISIBLE.includes(viajeActivoPasajero.estado);
 
-  console.log('[Movi][debug-auto] sincronizarCapaAutoConductor:', {
-    telefono,
-    estado: viajeActivoPasajero?.estado,
-    activo,
-  });
-
   if (activo) {
     iniciarSeguimientoPosicionConductor(telefono);
   } else {
@@ -1250,7 +1285,6 @@ function animarAutoHacia(latDestino, lngDestino, headingDestino) {
 
 function aplicarNuevaPosicionConductor(fix) {
   if (!fix || fix.lat == null || fix.lng == null) {
-    console.log('[Movi][debug-auto] aplicarNuevaPosicionConductor recibió un fix vacío/nulo:', fix);
     return;
   }
 
@@ -1268,8 +1302,6 @@ function aplicarNuevaPosicionConductor(fix) {
   if (simAutoTelefono && telefonoConductorSeguido === simAutoTelefono) {
     return;
   }
-
-  console.log('[Movi][debug-auto] Nueva posición recibida:', fix, '| ruta cargada:', Boolean(rutaGeometriaActual), '| capa auto-conductor existe:', Boolean(map.getSource('auto-conductor')));
 
   const proyeccion = rutaGeometriaActual
     ? proyectarEnRuta(fix.lat, fix.lng, rutaGeometriaActual)
@@ -1295,11 +1327,8 @@ function aplicarNuevaPosicionConductor(fix) {
 
 function iniciarSeguimientoPosicionConductor(telefono) {
   if (telefonoConductorSeguido === telefono && canalPosicionConductor) {
-    console.log('[Movi][debug-auto] Ya se estaba siguiendo a este teléfono, no se reinicia:', telefono);
     return;
   }
-
-  console.log('[Movi][debug-auto] Iniciando seguimiento de posición para telefono:', telefono);
 
   detenerSeguimientoPosicionConductor(); // por si veniamos siguiendo a otro conductor
   telefonoConductorSeguido = telefono;
@@ -1891,6 +1920,7 @@ document.getElementById('btn-pedir-viaje').addEventListener('click', async () =>
           driverSheet.style.display = 'block';
           aplicarDatosConductorEnSheet(actualizado);
           actualizarControlesDevEnViaje();
+          mostrarToast(`${actualizado.nombre_conductor || 'Tu conductor'} está en camino 🚗`, '🚗');
 
           // En modo admin (testing), como no hay un conductor real
           // mandando su GPS, arrancamos nosotros mismos una simulacion de
@@ -1908,7 +1938,14 @@ document.getElementById('btn-pedir-viaje').addEventListener('click', async () =>
               null,
             );
           }
+        } else if (actualizado.estado === 'llegó' && estadoAnterior !== 'llegó') {
+          mostrarToast('Tu conductor llegó al punto de encuentro 📍', '📍');
+          actualizarControlesDevEnViaje();
+        } else if (actualizado.estado === 'en_viaje' && estadoAnterior !== 'en_viaje') {
+          mostrarToast('Viaje iniciado — ¡buen viaje! ▶️', '▶️');
+          actualizarControlesDevEnViaje();
         } else if (actualizado.estado === 'cancelado') {
+          mostrarToast('El viaje fue cancelado ❌', '❌');
           buscandoOverlay.classList.remove('show');
           viajeActivoPasajero = null;
           simAutoDetener();
@@ -1917,6 +1954,7 @@ document.getElementById('btn-pedir-viaje').addEventListener('click', async () =>
             canalEsperaAsignacion = null;
           }
         } else if (actualizado.estado === 'finalizado') {
+          mostrarToast('Viaje finalizado ✅', '✅');
           driverSheet.style.display = 'none';
           resetPaymentSheet();
           paymentSheet.style.display = 'block';
@@ -2113,51 +2151,45 @@ function formatearFechaHistorial(fechaISO) {
     + ' ' + fecha.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' });
 }
 
-async function abrirHistorial() {
-  historialOverlay.classList.add('show');
-  historialLista.innerHTML = '<div class="result-empty">Cargando...</div>';
+// ==================================================================
+//  Historial HÍBRIDO: Supabase sigue siendo la fuente real (para que
+//  el historial no se pierda si cambian de celular, y para que vos
+//  como dueño de la app puedas verlo/auditarlo), pero ademas se guarda
+//  una copia en localStorage de cada dispositivo — asi el historial
+//  aparece INSTANTANEO al abrir la pantalla (sin esperar la red), y
+//  sigue funcionando para lectura aunque el celular se quede sin
+//  internet un rato. Cada vez que se trae una version fresca de
+//  Supabase, se actualiza la copia local.
+// ==================================================================
+function claveCacheHistorial(rol, telefono) {
+  return `historial_cache_${rol}_${telefono}`;
+}
 
-  const rolActual = localStorage.getItem('rol');
-  let query = supabase.from('viajes').select('*').in('estado', ['finalizado', 'cancelado']);
-
-  if (rolActual === 'conductor' && conductorTelefonoActual) {
-    query = query.eq('conductor_telefono', conductorTelefonoActual);
-  } else {
-    const usuario = cargarUsuario();
-    if (!usuario) {
-      historialLista.innerHTML = '<div class="result-empty">Sin viajes todavía</div>';
-      return;
-    }
-    query = query.eq('telefono_pasajero', usuario.telefono);
+function guardarHistorialEnCache(clave, data, paradasPorViaje) {
+  try {
+    localStorage.setItem(clave, JSON.stringify({ data, paradasPorViaje, guardadoEn: Date.now() }));
+  } catch (e) {
+    // localStorage lleno o deshabilitado — no es grave, el historial
+    // simplemente no queda cacheado esta vez, sigue funcionando por red.
+    console.warn('[Movi] No se pudo cachear el historial localmente:', e);
   }
+}
 
-  const { data, error } = await query.order('creado_en', { ascending: false }).limit(50);
-
-  if (error) {
-    console.error('[Movi] Error trayendo historial:', error);
-    historialLista.innerHTML = '<div class="result-empty">Error cargando el historial</div>';
-    return;
+function leerHistorialDeCache(clave) {
+  try {
+    const crudo = localStorage.getItem(clave);
+    if (!crudo) return null;
+    return JSON.parse(crudo);
+  } catch (e) {
+    return null;
   }
+}
 
+function renderHistorial(data, paradasPorViaje) {
   if (!data || data.length === 0) {
     historialLista.innerHTML = '<div class="result-empty">Sin viajes todavía</div>';
     return;
   }
-
-  // Traemos las paradas de todos estos viajes en una sola consulta para no
-  // hacer N llamadas separadas (igual que en la lista de pendientes).
-  const ids = data.map((v) => v.id);
-  const { data: paradasData } = await supabase
-    .from('paradas')
-    .select('*')
-    .in('viaje_id', ids)
-    .order('orden', { ascending: true });
-
-  const paradasPorViaje = {};
-  (paradasData || []).forEach((p) => {
-    if (!paradasPorViaje[p.viaje_id]) paradasPorViaje[p.viaje_id] = [];
-    paradasPorViaje[p.viaje_id].push(p);
-  });
 
   historialLista.innerHTML = data.map((v) => {
     const paradasViaje = paradasPorViaje[v.id] || [];
@@ -2184,6 +2216,80 @@ async function abrirHistorial() {
       </div>
     `;
   }).join('');
+}
+
+async function abrirHistorial() {
+  historialOverlay.classList.add('show');
+
+  const rolActual = localStorage.getItem('rol');
+  let telefonoActual;
+
+  if (rolActual === 'conductor' && conductorTelefonoActual) {
+    telefonoActual = conductorTelefonoActual;
+  } else {
+    const usuario = cargarUsuario();
+    if (!usuario) {
+      historialLista.innerHTML = '<div class="result-empty">Sin viajes todavía</div>';
+      return;
+    }
+    telefonoActual = usuario.telefono;
+  }
+
+  const clave = claveCacheHistorial(rolActual, telefonoActual);
+
+  // 1. Pintamos YA lo que haya en cache local, para que se sienta
+  //    instantaneo (si es la primera vez en este dispositivo, no hay
+  //    nada todavia y mostramos "Cargando...").
+  const cacheado = leerHistorialDeCache(clave);
+  if (cacheado) {
+    renderHistorial(cacheado.data, cacheado.paradasPorViaje);
+  } else {
+    historialLista.innerHTML = '<div class="result-empty">Cargando...</div>';
+  }
+
+  // 2. Traemos la version real y fresca de Supabase de fondo, y
+  //    actualizamos tanto la pantalla como la cache local con eso.
+  let query = supabase.from('viajes').select('*').in('estado', ['finalizado', 'cancelado']);
+  query = rolActual === 'conductor' && conductorTelefonoActual
+    ? query.eq('conductor_telefono', telefonoActual)
+    : query.eq('telefono_pasajero', telefonoActual);
+
+  const { data, error } = await query.order('creado_en', { ascending: false }).limit(50);
+
+  if (error) {
+    console.error('[Movi] Error trayendo historial:', error);
+    // Si ya habia algo en cache, lo dejamos como esta (mejor mostrar
+    // datos un poco viejos que un error tapando todo). Si no habia
+    // nada, ahi si mostramos el error.
+    if (!cacheado) {
+      historialLista.innerHTML = '<div class="result-empty">Error cargando el historial</div>';
+    }
+    return;
+  }
+
+  if (!data || data.length === 0) {
+    renderHistorial([], {});
+    guardarHistorialEnCache(clave, [], {});
+    return;
+  }
+
+  // Traemos las paradas de todos estos viajes en una sola consulta para no
+  // hacer N llamadas separadas (igual que en la lista de pendientes).
+  const ids = data.map((v) => v.id);
+  const { data: paradasData } = await supabase
+    .from('paradas')
+    .select('*')
+    .in('viaje_id', ids)
+    .order('orden', { ascending: true });
+
+  const paradasPorViaje = {};
+  (paradasData || []).forEach((p) => {
+    if (!paradasPorViaje[p.viaje_id]) paradasPorViaje[p.viaje_id] = [];
+    paradasPorViaje[p.viaje_id].push(p);
+  });
+
+  renderHistorial(data, paradasPorViaje);
+  guardarHistorialEnCache(clave, data, paradasPorViaje);
 }
 
 btnCerrarHistorial.addEventListener('click', () => {
