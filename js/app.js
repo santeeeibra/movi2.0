@@ -1196,6 +1196,10 @@ function pintarAutoEnMapa(lat, lng, heading) {
 // nueva posicion objetivo, en vez de saltar de golpe. La duracion (2.2s)
 // queda un poco por debajo del intervalo tipico entre fixes de GPS (3s)
 // para que la animacion siempre termine antes de que llegue el proximo.
+// Guarda cuándo llegó la última actualización, para calcular cuánto tardó
+// realmente entre una y otra (ver FIX debajo).
+let ultimaLlegadaFixMs = null;
+
 function animarAutoHacia(latDestino, lngDestino, headingDestino) {
   if (animacionAutoFrameId !== null) {
     cancelAnimationFrame(animacionAutoFrameId);
@@ -1203,7 +1207,26 @@ function animarAutoHacia(latDestino, lngDestino, headingDestino) {
   }
 
   const desde = posicionAutoMostrada || { lat: latDestino, lng: lngDestino, heading: headingDestino };
-  const duracion = 2200;
+
+  // FIX: antes la duracion era un numero fijo (2200ms), pensado para el
+  // intervalo real de GPS (~3s). El problema es que la simulacion del
+  // panel de dev manda actualizaciones mucho mas seguido (cada 350ms) —
+  // como cada animacion tardaba 2200ms en llegar a destino, nunca
+  // alcanzaba a terminar antes de que llegara el siguiente punto, y
+  // quedaba persiguiendo un blanco que siempre estaba mas adelante. Ese
+  // atraso constante "redondea" las esquinas de la ruta en vez de
+  // doblarlas en angulo recto, dando la sensacion de que el auto corta
+  // camino en las curvas. Ahora la duracion se calcula segun cuanto
+  // tiempo paso realmente desde la ultima actualizacion (con un piso de
+  // 150ms para que no se vea a los saltos, y un techo de 2200ms para no
+  // animar de mas si las actualizaciones vienen muy espaciadas), asi la
+  // animacion siempre llega a horario para el siguiente punto, sea GPS
+  // real (cada ~3s) o la simulacion rapida del panel de dev (cada 350ms).
+  const ahoraMs = performance.now();
+  const intervaloReal = ultimaLlegadaFixMs != null ? ahoraMs - ultimaLlegadaFixMs : 2200;
+  const duracion = Math.min(2200, Math.max(150, intervaloReal * 0.9));
+  ultimaLlegadaFixMs = ahoraMs;
+
   const inicio = performance.now();
 
   function tick(ahora) {
@@ -1305,6 +1328,7 @@ function detenerSeguimientoPosicionConductor() {
   }
   posicionAutoMostrada = null;
   rutaGeometriaActual = null;
+  ultimaLlegadaFixMs = null;
 
   const source = map.getSource('auto-conductor');
   if (source) source.setData({ type: 'FeatureCollection', features: [] });
