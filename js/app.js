@@ -2510,8 +2510,18 @@ async function devSimularRecorrido(puntos, textoOk) {
   window._iniciarAnimacionGlow?.();
 
   const coords = ruta.geometry.coordinates; // [[lng,lat], ...]
-  const pasosDeseados = 35; // cuantas actualizaciones de posicion mandamos en total
-  const salto = Math.max(1, Math.floor(coords.length / pasosDeseados));
+
+  // FIX: antes se salteaban puntos (cada ~35avo del total) para no mandar
+  // demasiadas escrituras a Supabase, pero eso hacia que la animacion
+  // conectara puntos lejanos con una linea recta — en las curvas/esquinas
+  // esto corta camino en diagonal en vez de seguir el trazado real de la
+  // calle, dando la sensacion de que el auto "flota" o va directo al
+  // destino ignorando las calles. Ahora se recorren TODOS los puntos de
+  // la geometria real (o de a 2 si la ruta es muy larga, para no pasarnos
+  // de unos ~150 pasos), a un intervalo mas corto, asi cada tramo entre
+  // un punto y el siguiente es tan chico que calca la curva real de la
+  // calle en vez de "cortar" por el medio.
+  const salto = coords.length > 150 ? Math.ceil(coords.length / 150) : 1;
   let i = 0;
 
   devMostrarFeedback(devFeedbackSimulacion, 'Simulando... 🚗');
@@ -2524,7 +2534,7 @@ async function devSimularRecorrido(puntos, textoOk) {
     const [lng, lat] = coords[i];
     await devMoverAutoA(lat, lng);
     i += salto;
-  }, 700); // similar al intervalo real entre actualizaciones de GPS
+  }, 350); // intervalo corto para que la animacion no llegue a "cortar camino"
 }
 
 devBtnSimularOrigen.addEventListener('click', () => {
