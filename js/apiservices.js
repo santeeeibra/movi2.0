@@ -69,6 +69,22 @@ export async function searchMapbox(query) {
     features = await buscarConBBox(textoConsulta, REGION_BBOX, tipos);
   }
 
+  if (interseccion) {
+    // FIX: cuando Mapbox no encuentra el cruce EXACTO entre las dos
+    // calles, en vez de devolver vacio suele devolver su "mejor
+    // adivinanza" (por ejemplo, el resultado de la primera calle sola,
+    // o un punto cercano pero incorrecto) — sin avisar que no es una
+    // interseccion real. Esto llevaba al pasajero a un punto
+    // equivocado sin ningun aviso. Ahora solo se aceptan resultados
+    // que Mapbox marca explicitamente con accuracy:"intersection"
+    // (confirmacion real de que encontro el cruce). Si ninguno cumple
+    // eso, se descarta todo y se devuelve vacio — mejor "sin
+    // resultados" y que el pasajero ajuste el pin a mano, que un
+    // resultado que parece preciso pero no lo es.
+    features = features.filter((f) => f.properties?.accuracy === 'intersection');
+    if (features.length === 0) return [];
+  }
+
   return features
     .map((f) => ({
       // Para intersecciones, mostramos el nombre en español tal como
