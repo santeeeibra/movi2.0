@@ -1637,8 +1637,29 @@ function mostrarDestino(lat, lng, direccion) {
 //  se mueve el origen (dragend) o cambia la lista de paradas. Pasa por
 //  el origen y todas las paradas en orden, asi que la distancia/duracion
 //  (y por lo tanto el precio) ya reflejan el recorrido completo.
-//  Formula: 2000 + (km * 200) + (minutos * 80), redondeado al peso.
+//
+//  FORMULA AJUSTADA A TARIFAS REALES DE VIEDMA (decreto municipal
+//  vigente desde 1/7/2026): bajada de bandera diurna $2.668, ficha
+//  ~$168 cada 100m (≈ $1.680/km). La formula vieja (2000 + km*200 +
+//  min*80) quedaba muy por debajo de la tarifa real de taxi/remis de
+//  la ciudad — un viaje de 2km terminaba costando ~$2.880 en vez de
+//  los ~$6.000 que cobraría un taxi real. Se corrigio para que el
+//  precio de Movi sea representativo de un valor de mercado real.
+//
+//  MOVI ENVIOS: mismo recorrido, pero con base y tarifa por km mas
+//  bajas (un paquete no necesita el mismo nivel de cuidado/tiempo que
+//  un pasajero, y suele ser mas rapido/directo), sin componente por
+//  minuto (no importa si hay trafico para el paquete en si).
 // ==================================================================
+const PRECIO_BASE = 2700;
+const PRECIO_POR_KM = 1700;
+const PRECIO_POR_MINUTO = 150;
+
+const ENVIO_BASE = 1500;
+const ENVIO_POR_KM = 1100;
+
+let tipoViajeSeleccionado = 'normal'; // 'normal' | 'envios'
+
 async function recalcularRuta() {
   if (!destinoActual || paradas.length === 0) return;
 
@@ -1649,8 +1670,12 @@ async function recalcularRuta() {
   const minutosTexto = Math.round(ruta.minutos);
   document.getElementById('ride-sub-normal').textContent = `${minutosTexto} min · ${ruta.km.toFixed(1)} km`;
 
-  const precio = Math.round(2000 + ruta.km * 200 + ruta.minutos * 80);
+  const precio = Math.round(PRECIO_BASE + ruta.km * PRECIO_POR_KM + ruta.minutos * PRECIO_POR_MINUTO);
   document.getElementById('ride-price-normal').textContent = `$ ${precio.toLocaleString('es-AR')}`;
+
+  const precioEnvio = Math.round(ENVIO_BASE + ruta.km * ENVIO_POR_KM);
+  const elPrecioEnvio = document.getElementById('ride-price-envios');
+  if (elPrecioEnvio) elPrecioEnvio.textContent = `$ ${precioEnvio.toLocaleString('es-AR')}`;
 
   if (map.getSource('ruta')) {
     map.getSource('ruta').setData({ type: 'Feature', properties: {}, geometry: ruta.geometry });
@@ -1826,6 +1851,7 @@ document.querySelectorAll('.ride-row').forEach((row) => {
   row.addEventListener('click', () => {
     document.querySelectorAll('.ride-row').forEach((r) => r.classList.remove('selected'));
     row.classList.add('selected');
+    tipoViajeSeleccionado = row.dataset.ride || 'normal';
   });
 });
 
@@ -1911,7 +1937,8 @@ document.getElementById('btn-pedir-viaje').addEventListener('click', async () =>
   buscandoOverlay.classList.add('show');
   actualizarControlesDevEnViaje();
 
-  const precioTexto = document.getElementById('ride-price-normal').textContent;
+  const idPrecio = tipoViajeSeleccionado === 'envios' ? 'ride-price-envios' : 'ride-price-normal';
+  const precioTexto = document.getElementById(idPrecio).textContent;
   const precio = Number(precioTexto.replace(/[^0-9]/g, '')) || null;
 
   const usuarioActual = cargarUsuario();
@@ -2461,7 +2488,9 @@ const commentInput = document.getElementById('comment-input');
 
 function resetPaymentSheet() {
   const nombreConductor = document.querySelector('#driver-sheet .driver-name').textContent;
-  const total = document.getElementById('ride-price-normal').textContent;
+  const total = viajeActivoPasajero?.precio
+    ? `$ ${Number(viajeActivoPasajero.precio).toLocaleString('es-AR')}`
+    : document.getElementById('ride-price-normal').textContent;
 
   document.getElementById('payment-driver-sub').textContent = `Con ${nombreConductor}`;
   document.getElementById('rating-driver-sub').textContent = `Con ${nombreConductor}`;
@@ -2677,7 +2706,7 @@ devBtnCrearViaje.addEventListener('click', async () => {
       es_prueba: true,
       eta_minutos: 3,
       telefono_pasajero: telefonoPasajero,
-      precio: 2500,
+      precio: 5800,
       origen_direccion: TEST_DIRECCION_ORIGEN,
       origen_lat: TEST_ORIGEN.lat,
       origen_lng: TEST_ORIGEN.lng,
