@@ -109,6 +109,17 @@ let conductorDisponible = false;      // espejo local de conductores.disponible
 let conductorViajeActivo = null;      // viaje en curso de este conductor (o null)
 let canalPendientesConductor = null;  // suscripcion Realtime a viajes pendientes
 
+// FIX: se usaba en iniciarSupervisionViajeConductor(), que se llama de
+// forma sincronica al cargar la pagina (ver mas abajo, "Inicial: decidir
+// que mostrar") para cualquiera que ya tenga un telefono de conductor
+// guardado — si esta declaracion quedaba mas abajo en el archivo (como
+// estaba antes), esa llamada fallaba con un ReferenceError de "variable
+// no inicializada" (temporal dead zone) apenas cargaba la pagina, y como
+// era un error sincronico en la carga inicial del modulo, TODO el codigo
+// que venia despues en el archivo (incluidos botones agregados
+// despues, como "Salir") nunca llegaba a registrarse.
+let canalViajeConductor = null;
+
 // ==================================================================
 //  Login rapido sin contraseña (localStorage + Supabase usuarios)
 // ==================================================================
@@ -534,7 +545,6 @@ const ESTADOS_VIAJE_INACTIVO_CONDUCTOR = ['pendiente', 'finalizado', 'cancelado'
 let watchIdConductor = null;
 let posicionAnteriorConductor = null;
 let ultimoEnvioGpsConductor = 0;
-let canalViajeConductor = null;
 
 // Formula de rumbo (bearing) entre dos coordenadas, en grados 0-360.
 // Respaldo para cuando el navegador no manda coords.heading (muy comun
