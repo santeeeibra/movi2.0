@@ -886,7 +886,7 @@ body {
 .confirm-overlay {
   position: absolute;
   inset: 0;
-  z-index: var(--z-splash);
+  z-index: 200;
   background: rgba(20, 23, 26, 0.55);
   display: none;
   align-items: center;
