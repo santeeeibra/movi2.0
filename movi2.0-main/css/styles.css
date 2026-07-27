@@ -1,0 +1,1624 @@
+:root {
+  /* Base cálida */
+  --negro: #2B2621;
+  --texto: #2B2621;
+  --texto-muted: #6E6459;   /* contraste AA sobre --crema */
+  --linea: #E8E3DA;
+  --crema: #F7F6F2;
+
+  /* Verde: acento de marca, no fondo */
+  --verde: #146B52;
+  --verde-fuerte: #0F5540;
+  --verde-tint: rgba(20, 107, 82, 0.08);
+  --verde-tint-strong: rgba(20, 107, 82, 0.14);
+
+  /* Radios — asignación 1 a 1, sin ambigüedad */
+  --radius-xs: 0.5rem;    /* chips pequeños, iconos de resultado */
+  --radius-sm: 0.75rem;   /* inputs, elementos compactos */
+  --radius-md: 1rem;      /* cards de una fila: .ride-row, .total-row */
+  --radius-lg: 1.25rem;   /* cards con más contenido: .driver-card, .alias-card */
+  --radius-xl: 2rem;      /* superficies grandes: .sheet, .drawer, overlays */
+  --radius-full: 999px;   /* solo lo tocable: .cta, .guardado-chip, .metodo-chip */
+  --radius-round: 50%;    /* iconos circulares, avatares, pines de mapa */
+
+  /* Sistema de capas: una sola fuente de verdad */
+  --z-map: 0;
+  --z-controls: 10;
+  --z-sheet: 20;
+  --z-drawer-overlay: 30;
+  --z-drawer: 40;
+  --z-toast: 50;
+  --z-splash: 100;
+
+  /* Motion: curvas y duraciones compartidas (antes cada transition tenia
+     su propia curva hardcodeada, sin consolidar) */
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);        /* entradas, feedback */
+  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);    /* movimiento en pantalla */
+  --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);     /* sheets/drawers estilo iOS */
+  --dur-press: 140ms;
+  --dur-popover: 180ms;
+  --dur-sheet: 320ms;
+}
+
+* { box-sizing: border-box; }
+
+/* Reduced motion: menos y mas suave, nunca cero. Se mantiene opacidad
+   (ayuda a entender que algo cambio) y se quita el movimiento. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Feedback tactil: nada respondia visualmente al toque. Una sola regla
+   para todos los elementos tocables en vez de repetirla por selector. */
+.cta,
+.ride-row,
+.guardado-chip,
+.paradas-action-btn,
+.origen-toast-btn,
+.confirm-btn,
+.driver-status-btn,
+.driver-pending-aceptar {
+  transition: transform var(--dur-press) var(--ease-out);
+}
+.cta:active,
+.ride-row:active,
+.guardado-chip:active,
+.paradas-action-btn:not(:disabled):active,
+.origen-toast-btn:active,
+.confirm-btn:active,
+.driver-status-btn:active,
+.driver-pending-aceptar:not(:disabled):active {
+  transform: scale(0.97);
+}
+
+body {
+  margin: 0;
+  font-family: 'Nunito', -apple-system, sans-serif;
+  background: var(--negro);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  padding: 24px;
+  color: var(--texto);
+}
+
+.phone {
+  position: relative;
+  width: 390px;
+  height: 844px;
+  max-height: 96vh;
+  background: var(--negro);
+  border-radius: 44px;
+  overflow: hidden;
+  box-shadow:
+    0 40px 80px -20px rgba(0, 0, 0, 0.6),
+    0 0 0 10px var(--negro),
+    0 0 0 12px #1F1B17;
+}
+
+#map {
+  position: absolute;
+  inset: 0;
+  z-index: var(--z-map);
+}
+
+.topbar {
+  position: absolute;
+  top: 18px;
+  left: 18px;
+  right: 18px;
+  z-index: var(--z-controls);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.glass {
+  background: rgba(255, 255, 255, 0.5);
+  backdrop-filter: blur(16px) saturate(150%);
+  -webkit-backdrop-filter: blur(16px) saturate(150%);
+  border: 1px solid rgba(255, 255, 255, 0.6);
+  box-shadow:
+    0 8px 24px rgba(43, 38, 33, 0.10),
+    inset 0 1px 0 rgba(255, 255, 255, 0.7);
+}
+
+.icon-btn {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  color: var(--negro);
+  cursor: pointer;
+  border: none;
+  padding: 0;
+}
+.icon-btn svg { width: 20px; height: 20px; }
+
+@media (max-width: 480px), (pointer: coarse) and (max-width: 900px) {
+  body {
+    padding: 0;
+    align-items: stretch;
+    justify-content: stretch;
+    min-height: 100dvh;
+  }
+  .phone {
+    width: 100vw;
+    height: 100dvh;
+    max-height: none;
+    border-radius: 0;
+    box-shadow: none;
+  }
+}
+
+/* ---- Sheet inferior: vidrio ---- */
+.sheet {
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  bottom: 10px;
+  z-index: var(--z-sheet);
+  border-radius: var(--radius-xl);
+  padding: 10px 20px 0;
+  max-height: 64vh;
+  overflow-y: auto;
+  background: rgba(247, 246, 242, 0.99);
+  backdrop-filter: blur(6px) saturate(120%);
+  -webkit-backdrop-filter: blur(6px) saturate(120%);
+  border: 1px solid rgba(255, 255, 255, 0.65);
+  box-shadow:
+    0 -10px 40px rgba(43, 38, 33, 0.14),
+    inset 0 1px 0 rgba(255, 255, 255, 0.8);
+  transition: transform var(--dur-sheet) var(--ease-drawer);
+  touch-action: none;
+}
+.sheet.dragging { transition: none; }
+.sheet.collapsed { transform: translateY(calc(100% - 120px)); }
+.sheet-handle-zone {
+  padding: 10px 0 4px;
+  margin: -10px 0 0;
+  cursor: grab;
+}
+.sheet-handle {
+  width: 40px;
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(43, 38, 33, 0.18);
+  margin: 4px auto 16px;
+}
+.sheet-title {
+  font-size: 21px;
+  font-weight: 800;
+  margin: 0 0 14px;
+  color: var(--negro);
+}
+.search-input {
+  width: 100%;
+  padding: 14px 16px;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.7);
+  background: rgba(255, 255, 255, 0.6);
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--texto);
+}
+.search-input::placeholder { color: var(--texto-muted); }
+.search-input:focus { outline: 2px solid var(--verde); }
+
+/* ---- Guardados: fila compacta ---- */
+.guardados-row {
+  display: flex;
+  gap: 6px;
+  margin: 10px 0 16px;
+}
+.guardado-chip {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 11px;
+  border-radius: var(--radius-full);
+  border: 1px solid rgba(43, 38, 33, 0.1);
+  background: rgba(255, 255, 255, 0.6);
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--negro);
+  cursor: pointer;
+}
+.guardado-chip svg { width: 12px; height: 12px; color: var(--verde); }
+
+/* ---- Resultados de busqueda ---- */
+.section-label {
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--texto-muted);
+  text-transform: uppercase;
+  margin: 22px 0 8px;
+}
+.section-label:first-child { margin-top: 4px; }
+.results-list { margin: 4px 0 14px; display: none; }
+.results-list.show { display: block; }
+.result-item {
+  opacity: 0;
+  transform: translateY(4px);
+  animation: resultEntrada var(--dur-popover) var(--ease-out) forwards;
+}
+.result-item:nth-child(1) { animation-delay: 0ms; }
+.result-item:nth-child(2) { animation-delay: 40ms; }
+.result-item:nth-child(3) { animation-delay: 80ms; }
+@keyframes resultEntrada {
+  to { opacity: 1; transform: translateY(0); }
+}
+.result-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 4px;
+  border-bottom: 1px solid rgba(43, 38, 33, 0.08);
+  cursor: pointer;
+}
+.result-item:last-child { border-bottom: none; }
+.result-pin {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  background: rgba(20, 107, 82, 0.12);
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+}
+.result-pin svg { width: 17px; height: 17px; color: var(--verde-fuerte); }
+.result-name { font-weight: 600; font-size: 14px; color: var(--negro); }
+.result-address { font-size: 12.5px; color: var(--texto-muted); font-weight: 600; }
+.result-empty {
+  padding: 12px 4px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--texto-muted);
+}
+
+/* ---- Paradas: botones de accion en el sheet ---- */
+.paradas-actions {
+  display: flex;
+  gap: 6px;
+  margin: 4px 0 16px;
+  flex-wrap: wrap;
+}
+.paradas-action-btn {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 8px 12px;
+  border-radius: 100px;
+  border: 1px solid rgba(43, 38, 33, 0.12);
+  background: rgba(255, 255, 255, 0.6);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--negro);
+  cursor: pointer;
+}
+.paradas-action-btn svg { width: 14px; height: 14px; color: var(--verde-fuerte); flex-shrink: 0; }
+.paradas-action-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.paradas-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 100px;
+  background: var(--verde);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+/* ---- Panel "Ver paradas": lista con orden, direccion y eliminar ---- */
+.paradas-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: var(--z-toast);
+  background: rgba(43, 38, 33, 0.45);
+  display: none;
+  align-items: flex-end;
+  justify-content: center;
+}
+.paradas-overlay.show { display: flex; }
+.paradas-panel {
+  width: 100%;
+  border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+  padding: 16px 16px max(20px, env(safe-area-inset-bottom));
+  background: rgba(247, 246, 242, 0.98);
+  backdrop-filter: blur(10px) saturate(140%);
+  -webkit-backdrop-filter: blur(10px) saturate(140%);
+  border-top: 1px solid rgba(255, 255, 255, 0.6);
+  box-shadow: 0 -10px 40px rgba(43, 38, 33, 0.2);
+  max-height: 75vh;
+  overflow-y: auto;
+}
+.paradas-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid rgba(43, 38, 33, 0.08);
+}
+.paradas-panel-title { font-size: 16px; font-weight: 600; color: var(--negro); }
+.parada-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 4px;
+  border-bottom: 1px solid rgba(43, 38, 33, 0.08);
+}
+.parada-row:last-child { border-bottom: none; }
+.parada-row-numero {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: var(--negro);
+  color: #fff;
+  display: grid;
+  place-items: center;
+  font-size: 12px;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+.parada-row-direccion { flex: 1; font-size: 13.5px; font-weight: 700; color: var(--negro); }
+.parada-row-eliminar {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(192, 57, 43, 0.12);
+  color: #C0392B;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.parada-row-eliminar svg { width: 15px; height: 15px; }
+.parada-row-eliminar:disabled { opacity: 0.3; cursor: not-allowed; }
+
+/* ---- Tu viaje: tipos seleccionables ---- */
+.ride-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px;
+  border-radius: var(--radius-md);
+  border: 1.5px solid rgba(43, 38, 33, 0.12);
+  background: rgba(255, 255, 255, 0.6);
+  margin-bottom: 10px;
+  cursor: pointer;
+  transition: border-color var(--dur-press) ease, background var(--dur-press) ease;
+}
+.ride-row.selected {
+  border-color: var(--verde);
+  background: var(--verde-tint);
+}
+.ride-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  background: var(--verde-tint-strong);
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+}
+.ride-icon svg { width: 22px; height: 22px; color: var(--verde-fuerte); }
+.ride-name { font-weight: 700; font-size: 14.5px; color: var(--negro); }
+.ride-sub { font-size: 12.5px; color: var(--texto-muted); font-weight: 500; }
+.ride-price { margin-left: auto; font-weight: 800; font-size: 16px; color: var(--negro); }
+
+.cta {
+  width: 100%;
+  height: 56px;
+  padding: 0 20px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: var(--radius-full);
+  background: var(--verde);
+  color: #fff;
+  font-family: inherit;
+  font-size: 15px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 4px;
+  cursor: pointer;
+}
+.cta svg { width: 18px; height: 18px; color: #fff; }
+
+/* "Pedir viaje" queda fijo abajo del sheet (no se pierde al aparecer los
+   botones de paradas): sticky dentro del scroll del sheet, con fondo
+   solido y sombra hacia arriba para separarlo del contenido que scrollea
+   detras. */
+#btn-pedir-viaje {
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
+  margin-top: 14px;
+  margin-bottom: max(20px, env(safe-area-inset-bottom));
+  box-shadow: 0 -12px 16px -6px rgba(247, 246, 242, 0.9);
+}
+
+/* ---- Buscando conductor (overlay centrado) ---- */
+.buscando-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: var(--z-sheet);
+  background: rgba(43, 38, 33, 0.45);
+  display: none;
+  align-items: flex-end;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity var(--dur-sheet) var(--ease-in-out);
+}
+.buscando-overlay.show { display: flex; }
+/* Se activa opacity en el frame siguiente a .show via JS para que la
+   transicion corra (display:none no anima). El blur de por medio evita
+   que se note el doble-expuesto justo cuando aparece el conductor. */
+.buscando-overlay.show.visible {
+  opacity: 1;
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+}
+.buscando-card {
+  width: 100%;
+  margin: 0 10px 10px;
+  border-radius: var(--radius-xl);
+  padding: 32px 24px max(28px, env(safe-area-inset-bottom));
+  background: rgba(255, 255, 255, 0.98);
+  backdrop-filter: blur(10px) saturate(140%);
+  -webkit-backdrop-filter: blur(10px) saturate(140%);
+  text-align: center;
+}
+.spinner {
+  width: 44px; height: 44px;
+  border-radius: 50%;
+  border: 4px solid rgba(20,107,82,0.15);
+  border-top-color: var(--verde);
+  margin: 0 auto 18px;
+  animation: girar 0.8s linear infinite;
+}
+@keyframes girar { to { transform: rotate(360deg); } }
+.buscando-titulo { font-weight: 600; font-size: 17px; color: var(--negro); margin-bottom: 20px; }
+.cancel-btn {
+  width: 100%;
+  height: 48px;
+  border-radius: 100px;
+  border: 1.5px solid rgba(43,38,33,0.15);
+  background: transparent;
+  color: var(--texto-muted);
+  font-family: inherit;
+  font-weight: 700;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+/* ---- Conductor asignado ---- */
+.driver-card {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px;
+  border-radius: var(--radius-lg);
+  background: rgba(255,255,255,0.6);
+  border: 1px solid rgba(255,255,255,0.7);
+  margin-bottom: 16px;
+}
+.driver-avatar {
+  width: 52px; height: 52px;
+  border-radius: 50%;
+  background: var(--negro);
+  color: #fff;
+  display: grid; place-items: center;
+  font-weight: 600; font-size: 18px;
+  flex-shrink: 0;
+}
+.driver-name { font-weight: 600; font-size: 15.5px; color: var(--negro); }
+.driver-car { font-size: 12.5px; color: var(--texto-muted); font-weight: 600; margin-top: 1px; }
+.driver-rating { display: flex; align-items: center; gap: 3px; margin-top: 4px; font-size: 12.5px; font-weight: 700; color: var(--negro); }
+.driver-rating svg { width: 13px; height: 13px; color: #E0A542; }
+
+.status-row {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 13.5px; font-weight: 700; color: var(--verde-fuerte);
+  margin-bottom: 14px;
+}
+.status-row svg { width: 16px; height: 16px; }
+
+.eta-chips { display: flex; gap: 8px; margin-bottom: 18px; }
+.eta-chip {
+  padding: 7px 13px; border-radius: 100px;
+  background: rgba(43,38,33,0.06);
+  font-size: 12.5px; font-weight: 700; color: var(--negro);
+}
+
+.contact-row { display: flex; gap: 10px; margin-bottom: 12px; }
+.contact-btn {
+  flex: 1;
+  display: flex; align-items: center; justify-content: center; gap: 7px;
+  height: 46px; border-radius: 100px;
+  border: 1.5px solid var(--verde);
+  background: var(--verde-tint);
+  color: var(--verde-fuerte);
+  font-weight: 600; font-size: 13.5px;
+  cursor: pointer;
+}
+.contact-btn svg { width: 16px; height: 16px; }
+
+/* ---- Drawers: menu (izquierda) y perfil (derecha) ---- */
+.drawer-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: var(--z-drawer-overlay);
+  background: rgba(43, 38, 33, 0.45);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--dur-popover) ease;
+}
+.drawer-overlay.show {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.drawer {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: var(--z-drawer);
+  width: 82%;
+  max-width: 320px;
+  padding: max(20px, env(safe-area-inset-top)) 20px 20px;
+  overflow-y: auto;
+  background: rgba(247, 246, 242, 0.98);
+  backdrop-filter: blur(10px) saturate(140%);
+  -webkit-backdrop-filter: blur(10px) saturate(140%);
+  transition: transform var(--dur-sheet) var(--ease-drawer);
+}
+.drawer-left {
+  left: 0;
+  border-right: 1px solid rgba(255, 255, 255, 0.6);
+  box-shadow: 10px 0 40px rgba(43, 38, 33, 0.14);
+  transform: translateX(-100%);
+}
+.drawer-left.show { transform: translateX(0); }
+.drawer-right {
+  right: 0;
+  border-left: 1px solid rgba(255, 255, 255, 0.6);
+  box-shadow: -10px 0 40px rgba(43, 38, 33, 0.14);
+  transform: translateX(100%);
+}
+.drawer-right.show { transform: translateX(0); }
+
+.drawer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 18px;
+}
+.drawer-title { font-size: 21px; font-weight: 600; color: var(--negro); }
+.drawer-close { background: rgba(43, 38, 33, 0.06); width: 36px; height: 36px; }
+.drawer-close svg { width: 16px; height: 16px; }
+
+.drawer-section-label {
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--texto-muted);
+  text-transform: uppercase;
+  margin: 18px 0 8px;
+}
+.drawer-section-label:first-of-type { margin-top: 4px; }
+
+.drawer-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 13px 10px;
+  border-radius: 16px;
+  font-weight: 700;
+  font-size: 14.5px;
+  color: var(--negro);
+  cursor: pointer;
+}
+.drawer-item:hover { background: rgba(43, 38, 33, 0.06); }
+.drawer-item svg { width: 19px; height: 19px; color: var(--verde-fuerte); flex-shrink: 0; }
+.drawer-item-danger { color: #C0392B; }
+.drawer-item-danger svg { color: #C0392B; }
+
+.perfil-card {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px;
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.7);
+  margin-bottom: 6px;
+}
+.perfil-email { font-size: 12.5px; color: var(--texto-muted); font-weight: 600; margin-top: 1px; }
+
+/* ---- Mensajes del formulario de conductor ---- */
+.conductor-msg { font-size:13px; font-weight:700; text-align:center; margin-top:14px; min-height:20px; }
+
+/* ---- Boton temporal de desarrollo (simular fin de viaje) ---- */
+.dev-sim-btn {
+  width: 100%;
+  margin-top: 6px;
+  padding: 10px;
+  border: none;
+  background: transparent;
+  color: var(--texto-muted);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+/* ---- Pago + calificacion ---- */
+.payment-icon-check {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: var(--verde-tint-strong);
+  color: var(--verde-fuerte);
+  display: grid;
+  place-items: center;
+  margin: 4px auto 14px;
+}
+.payment-icon-check svg { width: 28px; height: 28px; }
+.payment-title {
+  font-size: 21px;
+  font-weight: 600;
+  color: var(--negro);
+  text-align: center;
+  margin: 0 0 4px;
+}
+.payment-subtitle {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--texto-muted);
+  text-align: center;
+  margin: 0 0 18px;
+}
+.total-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px;
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.7);
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--texto-muted);
+  margin-bottom: 16px;
+}
+.total-amount { font-size: 18px; font-weight: 800; color: var(--negro); }
+
+.metodo-row { display: flex; gap: 8px; margin: 0 0 14px; }
+.metodo-chip {
+  flex: 1;
+  text-align: center;
+  padding: 12px;
+  border-radius: var(--radius-full);
+  border: 1.5px solid rgba(43, 38, 33, 0.12);
+  background: rgba(255, 255, 255, 0.6);
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--negro);
+  cursor: pointer;
+  transition: border-color var(--dur-press) ease, background var(--dur-press) ease;
+}
+.metodo-chip.selected {
+  border-color: var(--verde);
+  background: var(--verde-tint);
+  color: var(--verde-fuerte);
+}
+
+.alias-card {
+  padding: 14px;
+  border-radius: var(--radius-lg);
+  background: var(--verde-tint-strong);
+  border: 1px solid rgba(20, 107, 82, 0.2);
+  margin-bottom: 16px;
+}
+.alias-label { font-size: 11.5px; font-weight: 700; color: var(--verde-fuerte); text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 4px; }
+.alias-value { font-size: 15px; font-weight: 600; color: var(--negro); }
+
+.stars-row {
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+  margin: 4px 0 18px;
+}
+.stars-row .star {
+  width: 34px;
+  height: 34px;
+  color: rgba(43, 38, 33, 0.15);
+  cursor: pointer;
+  transition: color var(--dur-press) ease;
+}
+.stars-row .star.active { color: #E0A542; }
+
+.comment-input {
+  width: 100%;
+  min-height: 72px;
+  padding: 14px 16px;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.7);
+  background: rgba(255, 255, 255, 0.6);
+  font-family: inherit;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--texto);
+  resize: none;
+  margin-bottom: 16px;
+}
+.comment-input::placeholder { color: var(--texto-muted); }
+
+/* Pin de origen: "mi ubicacion", circulo azul con borde blanco, animacion radar y sombra 3D */
+.origen-marker {
+  position: relative;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--verde-fuerte);
+  border: 3px solid #ffffff;
+  box-shadow: 0 0 0 2px rgba(15, 85, 64, 0.35), 0 2px 6px rgba(0, 0, 0, 0.3);
+}
+
+/* Anillo pulsante tipo "radar" que crece y se desvanece detrás del punto */
+.origen-marker::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 22px;
+  height: 22px;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: rgba(15, 85, 64, 0.25);
+  z-index: -1;
+  animation: radar-ring 2s ease-out infinite;
+}
+
+/* Sombra elíptica para dar sensación de profundidad/altura en 3D */
+.origen-marker::after {
+  content: '';
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  width: 20px;
+  height: 6px;
+  margin-top: 2px;
+  transform: translateX(-50%);
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.15);
+  filter: blur(3px);
+  z-index: -2;
+}
+
+@keyframes radar-ring {
+  0% {
+    transform: translate(-50%, -50%) scale(1);
+    opacity: 0.45;
+  }
+  100% {
+    transform: translate(-50%, -50%) scale(3);
+    opacity: 0;
+  }
+}
+
+/* Pin numerado de parada: circulo negro con el numero de orden adentro,
+   borde blanco y sombra elíptica debajo (mismo recurso "flotante" que el
+   pin de origen), visualmente distinto (color, forma, tamaño) del origen. */
+.parada-marker {
+  position: relative;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--negro);
+  border: 3px solid #ffffff;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: 'Nunito', sans-serif;
+  font-weight: 600;
+  font-size: 13px;
+  color: #ffffff;
+}
+/* La ultima parada (destino final) se distingue en verde */
+.parada-marker.parada-marker-final {
+  background: var(--verde);
+}
+
+/* Sombra elíptica para dar sensación de profundidad/altura en 3D */
+.parada-marker::after {
+  content: '';
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  width: 22px;
+  height: 7px;
+  margin-top: 2px;
+  transform: translateX(-50%);
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.18);
+  filter: blur(3px);
+  z-index: -2;
+}
+
+.comment-input:focus { outline: 2px solid var(--verde); }
+
+/* Aviso: origen movido a mano, hay que confirmarlo antes de pedir viaje */
+.origen-toast {
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  top: 70px;
+  z-index: var(--z-toast);
+  display: none;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: 20px;
+  background: rgba(43, 38, 33, 0.85);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25);
+  color: #fff;
+}
+.origen-toast.show { display: flex; }
+.origen-toast-texto {
+  flex: 1;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.3;
+}
+.origen-toast-btns {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.origen-toast-btn {
+  border: none;
+  border-radius: 100px;
+  padding: 7px 14px;
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.origen-toast-btn.confirmar { background: var(--verde); color: #fff; }
+.origen-toast-btn.volver { background: rgba(255, 255, 255, 0.15); color: #fff; }
+
+.cta[disabled] { opacity: 0.45; cursor: not-allowed; }
+
+/* ---- Login sheet: overlay completo sobre toda la app ---- */
+.login-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: var(--z-splash);
+  background: rgba(43, 38, 33, 0.7);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  display: none;
+  align-items: flex-end;
+  justify-content: center;
+}
+.login-overlay.show { display: flex; }
+
+.login-sheet {
+  width: 100%;
+  margin: 0 10px 10px;
+  border-radius: var(--radius-xl);
+  padding: 32px 24px max(28px, env(safe-area-inset-bottom));
+  background: rgba(255, 255, 255, 0.98);
+  backdrop-filter: blur(10px) saturate(140%);
+  -webkit-backdrop-filter: blur(10px) saturate(140%);
+  border: 1px solid rgba(255, 255, 255, 0.65);
+  box-shadow: 0 -10px 40px rgba(43, 38, 33, 0.14);
+  max-height: 80vh;
+  overflow-y: auto;
+}
+
+.login-logo {
+  width: 64px;
+  height: 64px;
+  border-radius: 20px;
+  background: var(--verde);
+  display: grid;
+  place-items: center;
+  margin: 0 auto 16px;
+  color: #fff;
+  font-weight: 600;
+  font-size: 28px;
+}
+
+.login-title {
+  font-size: 24px;
+  font-weight: 800;
+  color: var(--negro);
+  text-align: center;
+  margin: 0 0 6px;
+}
+
+.login-subtitle {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--texto-muted);
+  text-align: center;
+  margin: 0 0 24px;
+}
+
+.login-field {
+  margin-bottom: 14px;
+}
+
+.login-label {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--texto-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 6px;
+  display: block;
+}
+
+.login-input {
+  width: 100%;
+  padding: 16px;
+  border-radius: 16px;
+  border: 1.5px solid rgba(43, 38, 33, 0.12);
+  background: rgba(255, 255, 255, 0.6);
+  font-family: inherit;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--negro);
+  transition: border-color var(--dur-press) ease;
+}
+
+.login-input:focus {
+  outline: none;
+  border-color: var(--verde);
+}
+
+.login-input::placeholder {
+  color: var(--texto-muted);
+}
+
+.login-input.error {
+  border-color: #C0392B;
+  background: rgba(192, 57, 43, 0.06);
+}
+
+.login-error {
+  font-size: 12px;
+  font-weight: 700;
+  color: #C0392B;
+  margin-top: 4px;
+  display: none;
+}
+
+.login-error.show {
+  display: block;
+}
+
+.login-terms {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--texto-muted);
+  text-align: center;
+  margin: 16px 0 0;
+  line-height: 1.4;
+}
+
+/* ================================================================ */
+/*  Boton flotante: centrar mapa segun el momento del viaje         */
+/* ================================================================ */
+.center-floating-btn {
+  position: absolute;
+  /* Apilado arriba de los controles de zoom de Mapbox (ocupan de bottom:10px
+     a bottom:~112px, zoom + atribucion), con separacion clara. */
+  bottom: 130px;
+  right: 14px;
+  z-index: 45;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: rgba(43, 38, 33, 0.85);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1.5px solid rgba(255, 255, 255, 0.2);
+  color: #fff;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+  transition: transform var(--dur-press) ease, box-shadow var(--dur-press) ease;
+}
+.center-floating-btn:hover {
+  transform: scale(1.08);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.4);
+}
+.center-floating-btn svg {
+  width: 20px;
+  height: 20px;
+}
+/* Pulso rapido de feedback al tocar el boton */
+.center-floating-btn.pulse {
+  animation: center-btn-pulse 0.35s ease;
+}
+@keyframes center-btn-pulse {
+  0% { transform: scale(1); }
+  40% { transform: scale(0.82); }
+  100% { transform: scale(1); }
+}
+
+/* ================================================================ */
+/*  Dev / Admin panel                                               */
+/* ================================================================ */
+.dev-floating-btn {
+  position: absolute;
+  /* Apilado arriba del boton de centrar mapa, que a su vez esta arriba de
+     los controles de zoom de Mapbox — evita superponerse con ninguno. */
+  bottom: 190px;
+  right: 14px;
+  z-index: 45;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: rgba(43, 38, 33, 0.85);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1.5px solid rgba(255, 255, 255, 0.2);
+  color: #fff;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+  transition: transform var(--dur-press) ease, box-shadow var(--dur-press) ease;
+}
+.dev-floating-btn:hover {
+  transform: scale(1.08);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.4);
+}
+.dev-floating-btn svg {
+  width: 20px;
+  height: 20px;
+}
+
+.dev-panel-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 200;
+  background: rgba(43, 38, 33, 0.55);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  display: none;
+  align-items: flex-end;
+  justify-content: center;
+}
+.dev-panel-overlay.show {
+  display: flex;
+}
+
+.dev-panel {
+  width: 100%;
+  margin: 0 0 0;
+  border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+  padding: 16px 16px max(20px, env(safe-area-inset-bottom));
+  background: rgba(247, 246, 242, 0.98);
+  backdrop-filter: blur(10px) saturate(140%);
+  -webkit-backdrop-filter: blur(10px) saturate(140%);
+  border-top: 1px solid rgba(255, 255, 255, 0.6);
+  box-shadow: 0 -10px 40px rgba(43, 38, 33, 0.2);
+  max-height: 80vh;
+  overflow-y: auto;
+}
+
+.dev-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid rgba(43, 38, 33, 0.08);
+}
+.dev-panel-title {
+  font-size: 16px;
+  font-weight: 800;
+  color: var(--negro);
+}
+.dev-panel-close {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(43, 38, 33, 0.08);
+  color: var(--negro);
+  font-size: 18px;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  line-height: 1;
+}
+
+.dev-card {
+  background: rgba(255, 255, 255, 0.7);
+  border: 1px solid rgba(43, 38, 33, 0.08);
+  border-radius: 16px;
+  padding: 12px 14px;
+  margin-bottom: 10px;
+}
+.dev-card-title {
+  font-size: 13px;
+  font-weight: 800;
+  color: var(--negro);
+  margin-bottom: 8px;
+}
+.dev-card-body {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.dev-input {
+  flex: 1;
+  min-width: 0;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1.5px solid rgba(43, 38, 33, 0.12);
+  background: rgba(255, 255, 255, 0.6);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--negro);
+}
+.dev-input:focus {
+  outline: none;
+  border-color: var(--verde);
+}
+.dev-btn {
+  padding: 9px 16px;
+  border-radius: 100px;
+  border: none;
+  background: var(--negro);
+  color: #fff;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: opacity var(--dur-press) ease;
+}
+.dev-btn:hover {
+  opacity: 0.85;
+}
+.dev-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.dev-btn-danger {
+  background: #C0392B;
+}
+.dev-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 5px 12px;
+  border-radius: 100px;
+  background: rgba(20, 107, 82, 0.12);
+  color: var(--verde-fuerte);
+  font-size: 12px;
+  font-weight: 800;
+}
+.dev-feedback {
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--verde-fuerte);
+  margin-top: 6px;
+  min-height: 16px;
+}
+.dev-feedback.error {
+  color: #C0392B;
+}
+.dev-json {
+  width: 100%;
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(43, 38, 33, 0.06);
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--negro);
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 120px;
+  overflow-y: auto;
+}
+
+/* ================================================================ */
+/*  Recuperado de feature/conductor-flow: se habia perdido en main    */
+/*  al no completarse el merge. Notificaciones in-app + modal propio  */
+/* ================================================================ */
+/* ================================================================ */
+/*  Notificaciones dentro de la app (toast) — conductor asignado,    */
+/*  llego, viaje iniciado/finalizado/cancelado, nuevo viaje           */
+/*  disponible para el conductor. Reemplaza los avisos por WhatsApp.  */
+/* ================================================================ */
+.app-toast {
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  top: 70px;
+  z-index: var(--z-toast);
+  display: none;
+  align-items: center;
+  gap: 10px;
+  padding: 13px 16px;
+  border-radius: 18px;
+  background: rgba(43, 38, 33, 0.9);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+  color: #fff;
+}
+.app-toast.show {
+  display: flex;
+  animation: appToastEntrada 0.3s cubic-bezier(0.2, 0.9, 0.3, 1.3);
+}
+.app-toast.hiding {
+  animation: appToastSalida 0.25s ease forwards;
+}
+@keyframes appToastEntrada {
+  from { opacity: 0; transform: translateY(-14px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes appToastSalida {
+  from { opacity: 1; transform: translateY(0); }
+  to { opacity: 0; transform: translateY(-14px); }
+}
+.app-toast-icon { font-size: 18px; flex-shrink: 0; }
+.app-toast-texto {
+  flex: 1;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+/* ================================================================ */
+/*  Modal de confirmacion propio (reemplaza window.confirm)          */
+/* ================================================================ */
+.confirm-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 200;
+  background: rgba(43, 38, 33, 0.55);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+.confirm-overlay.show {
+  display: flex;
+  animation: confirmFadeIn 0.15s ease;
+}
+@keyframes confirmFadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.confirm-card {
+  width: 100%;
+  max-width: 320px;
+  padding: 22px 20px 18px;
+  border-radius: 22px;
+  background: rgba(247, 246, 242, 0.98);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.3);
+  animation: confirmPop 0.2s cubic-bezier(0.2, 0.9, 0.3, 1.3);
+}
+@keyframes confirmPop {
+  from { opacity: 0; transform: scale(0.92); }
+  to { opacity: 1; transform: scale(1); }
+}
+.confirm-texto {
+  font-size: 14.5px;
+  font-weight: 700;
+  color: var(--negro);
+  line-height: 1.5;
+  margin-bottom: 18px;
+  white-space: pre-line;
+}
+.confirm-botones {
+  display: flex;
+  gap: 10px;
+}
+.confirm-btn {
+  flex: 1;
+  padding: 12px;
+  border: none;
+  border-radius: 14px;
+  font-family: inherit;
+  font-size: 13.5px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.confirm-btn.cancelar {
+  background: rgba(43, 38, 33, 0.08);
+  color: var(--negro);
+}
+.confirm-btn.confirmar {
+  background: var(--negro);
+  color: #fff;
+}
+
+/* ================================================================ */
+/*  Recuperado de feature/conductor-flow: flujo completo del         */
+/*  conductor (disponibilidad, viajes pendientes, viaje activo)      */
+/* ================================================================ */
+/* ================================================================ */
+/*  FASE 0 — Boton "Atras" en login de pasajero / conductor         */
+/* ================================================================ */
+.login-back-btn {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-round);
+  border: none;
+  background: rgba(43, 38, 33, 0.06);
+  color: var(--negro);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  transition: background var(--dur-press) ease;
+}
+.login-back-btn:hover { background: rgba(43, 38, 33, 0.12); }
+.login-back-btn svg { width: 18px; height: 18px; }
+
+/* ================================================================ */
+/*  FASE 1 — Disponibilidad del conductor                            */
+/* ================================================================ */
+.driver-home-sheet { text-align: left; max-height: 78vh; }
+.driver-home-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 18px;
+}
+
+.driver-exit-btn {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 8px 12px 8px 8px;
+  border: none;
+  border-radius: var(--radius-full);
+  background: rgba(43, 38, 33, 0.06);
+  color: var(--texto-muted);
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background var(--dur-press) ease;
+}
+.driver-exit-btn svg { width: 16px; height: 16px; flex-shrink: 0; }
+.driver-exit-btn:hover { background: rgba(43, 38, 33, 0.12); }
+
+/* Boton grande de estado, tipo "Go Online" — reemplaza al toggle chico */
+.driver-status-btn {
+  position: relative;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 18px;
+  margin-bottom: 18px;
+  border: none;
+  border-radius: var(--radius-md);
+  background: rgba(43, 38, 33, 0.05);
+  cursor: pointer;
+  overflow: hidden;
+  transition: background var(--dur-popover) ease;
+}
+.driver-status-btn[aria-checked="true"] {
+  background: linear-gradient(135deg, var(--verde), var(--verde-fuerte));
+}
+
+.driver-status-dot {
+  position: relative;
+  width: 14px;
+  height: 14px;
+  border-radius: var(--radius-round);
+  background: rgba(43, 38, 33, 0.28);
+  flex-shrink: 0;
+  transition: background var(--dur-popover) ease;
+}
+.driver-status-btn[aria-checked="true"] .driver-status-dot {
+  background: #ffffff;
+}
+
+/* Anillo tipo "radar" que solo pulsa cuando esta conectado */
+.driver-status-radar {
+  position: absolute;
+  left: 25px;
+  top: 50%;
+  width: 14px;
+  height: 14px;
+  border-radius: var(--radius-round);
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+.driver-status-btn[aria-checked="true"] .driver-status-radar {
+  animation: driverRadarPulse 1.8s ease-out infinite;
+  background: rgba(255, 255, 255, 0.55);
+}
+@keyframes driverRadarPulse {
+  0% { transform: translateY(-50%) scale(1); opacity: 0.55; }
+  100% { transform: translateY(-50%) scale(3.2); opacity: 0; }
+}
+
+.driver-status-texto {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--negro);
+  transition: color var(--dur-popover) ease;
+}
+.driver-status-btn[aria-checked="true"] .driver-status-texto {
+  color: #ffffff;
+}
+
+.driver-pending-empty {
+  text-align: center;
+  padding: 10px 10px 4px;
+}
+.driver-pending-empty-texto {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--texto-muted);
+  line-height: 1.4;
+}
+
+/* ================================================================ */
+/*  FASE 2/3 — Lista de viajes pendientes para aceptar              */
+/* ================================================================ */
+.driver-pending-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.driver-pending-card {
+  border: 1.5px solid rgba(43, 38, 33, 0.08);
+  border-radius: 18px;
+  padding: 14px;
+  background: rgba(255, 255, 255, 0.6);
+}
+.driver-pending-ruta {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--negro);
+  line-height: 1.45;
+  margin-bottom: 6px;
+}
+.driver-pending-ruta .punto { color: var(--texto-muted); font-weight: 600; }
+.driver-pending-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+}
+.driver-pending-precio {
+  font-size: 16px;
+  font-weight: 800;
+  color: var(--verde-fuerte);
+}
+.driver-pending-tiempo {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--texto-muted);
+}
+.driver-pending-aceptar {
+  width: 100%;
+  padding: 12px;
+  border: none;
+  border-radius: 14px;
+  background: var(--verde);
+  color: #fff;
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.driver-pending-aceptar:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* ================================================================ */
+/*  FASE 4 — Vista del conductor durante el viaje activo            */
+/* ================================================================ */
+.driver-active-sheet {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: var(--z-sheet);
+  border-radius: 28px 28px 0 0;
+  padding: 8px 20px max(20px, env(safe-area-inset-bottom));
+  background: rgba(255, 255, 255, 0.94);
+  backdrop-filter: blur(32px) saturate(190%);
+  -webkit-backdrop-filter: blur(32px) saturate(190%);
+  box-shadow: 0 -10px 40px rgba(43, 38, 33, 0.14);
+}
+.driver-active-info {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--texto-muted);
+  line-height: 1.5;
+  margin: 4px 0 16px;
+}
+.driver-active-info strong { color: var(--negro); }
+#driver-active-sheet .cta { margin-bottom: 10px; }
+#driver-active-sheet .cta:last-child { margin-bottom: 0; }
+
+/* ================================================================ */
+/*  Controles de admin embebidos en el flujo real (saltear busqueda /  */
+/*  saltear animacion / iniciar viaje simulado) — solo visibles con    */
+/*  localStorage.es_admin === 'true'.                                  */
+/* ================================================================ */
+.dev-skip-link {
+  display: block;
+  width: 100%;
+  margin-top: 14px;
+  padding: 10px;
+  border: 1.5px dashed rgba(230, 126, 34, 0.5);
+  border-radius: var(--radius-xs);
+  background: rgba(230, 126, 34, 0.08);
+  color: #b9640a;
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.dev-skip-link:hover { background: rgba(230, 126, 34, 0.15); }
+
+.dev-controles-viaje {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+.dev-inline-btn {
+  flex: 1;
+  padding: 10px 8px;
+  border: 1.5px dashed rgba(230, 126, 34, 0.5);
+  border-radius: var(--radius-xs);
+  background: rgba(230, 126, 34, 0.08);
+  color: #b9640a;
+  font-family: inherit;
+  font-size: 11.5px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.dev-inline-btn:hover { background: rgba(230, 126, 34, 0.15); }
+.dev-inline-btn:disabled { opacity: 0.5; cursor: not-allowed; }
