@@ -8,6 +8,40 @@ import { MAPBOX_TOKEN } from './config.js';
 import { searchMapbox, getRuta } from './apiservices.js';
 import { initMonitoring } from './monitoring.js';
 
+// ==================================================================
+//  SISTEMA ANTI-CACHE-VIEJO: cada build tiene un identificador unico
+//  (timestamp de cuando se compilo, ver vite.config.js). Si el
+//  guardado en este dispositivo no coincide con el de la version que
+//  se acaba de cargar, es que habia quedado algo viejo dando vueltas
+//  (service worker, cache del navegador) — se limpia todo eso y se
+//  recarga UNA sola vez, de forma automatica y transparente. Con esto
+//  no deberia hacer falta nunca mas pedirle a nadie que borre cache a
+//  mano para ver los cambios nuevos.
+// ==================================================================
+if (import.meta.env.PROD && typeof __APP_BUILD__ !== 'undefined') {
+  const versionGuardada = localStorage.getItem('app_build_version');
+  const yaRecargoPorEstaVersion = sessionStorage.getItem('app_ya_recargo_por_version');
+
+  if (versionGuardada && versionGuardada !== __APP_BUILD__ && !yaRecargoPorEstaVersion) {
+    sessionStorage.setItem('app_ya_recargo_por_version', '1');
+
+    const limpiarServiceWorkers = 'serviceWorker' in navigator
+      ? navigator.serviceWorker.getRegistrations().then((regs) => Promise.all(regs.map((r) => r.unregister())))
+      : Promise.resolve();
+
+    const limpiarCaches = 'caches' in window
+      ? caches.keys().then((claves) => Promise.all(claves.map((k) => caches.delete(k))))
+      : Promise.resolve();
+
+    Promise.all([limpiarServiceWorkers, limpiarCaches]).finally(() => {
+      localStorage.setItem('app_build_version', __APP_BUILD__);
+      window.location.reload();
+    });
+  } else {
+    localStorage.setItem('app_build_version', __APP_BUILD__);
+  }
+}
+
 Sentry.init({
   dsn: "https://7bc90b9a17ed004fbac2a7997ab37093@o4511797812920320.ingest.de.sentry.io/4511797825437776",
   integrations: [],
@@ -242,6 +276,19 @@ function mostrarOverlay(el) {
     .forEach(o => o.classList.remove('show'));
   if (el) el.classList.add('show');
 }
+
+// FIX: estos dos botones tienen el HTML/CSS desde hace rato (Fase 0),
+// pero nunca llegaron a tener el addEventListener enganchado — se
+// perdio en algun punto de tantas idas y vueltas durante la sesion.
+// Vuelven a la seleccion de rol sin guardar nada.
+document.getElementById('btn-atras-login')?.addEventListener('click', () => {
+  mostrarOverlay(roleSelectOverlay);
+  bloquearApp(true);
+});
+document.getElementById('btn-atras-conductor')?.addEventListener('click', () => {
+  mostrarOverlay(roleSelectOverlay);
+  bloquearApp(true);
+});
 
 // ==================================================================
 //  Notificaciones dentro de la app — reemplaza lo que iba a ser un
