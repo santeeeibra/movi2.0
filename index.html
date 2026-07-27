@@ -381,14 +381,19 @@
   <div class="login-overlay" id="driver-waiting-overlay">
     <div class="login-sheet driver-home-sheet">
       <div class="driver-home-header">
+        <button class="driver-exit-btn" id="btn-salir-conductor" aria-label="Cerrar sesión / cambiar de rol">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+          <span>Salir</span>
+        </button>
         <div class="login-logo" style="margin:0;">M</div>
-        <div class="driver-disponible-toggle">
-          <span class="driver-disponible-label" id="driver-disponible-label">No disponible</span>
-          <button class="toggle-switch" id="toggle-disponible" role="switch" aria-checked="false" aria-label="Disponible para viajes">
-            <span class="toggle-switch-knob"></span>
-          </button>
-        </div>
+        <div style="width:70px;"></div>
       </div>
+
+      <button class="driver-status-btn" id="toggle-disponible" role="switch" aria-checked="false">
+        <span class="driver-status-radar"></span>
+        <span class="driver-status-dot"></span>
+        <span class="driver-status-texto" id="driver-disponible-label">Conectarte para recibir viajes</span>
+      </button>
 
       <div class="driver-pending-empty" id="driver-pending-empty">
         <div class="spinner" style="margin:20px auto 12px;"></div>

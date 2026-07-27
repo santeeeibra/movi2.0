@@ -561,9 +561,48 @@ const btnConductorLlegue = document.getElementById('btn-conductor-llegue');
 const btnConductorIniciar = document.getElementById('btn-conductor-iniciar');
 const btnConductorFinalizar = document.getElementById('btn-conductor-finalizar');
 
+// Cierra la sesion actual (pasajero o conductor) y vuelve a la
+// seleccion de rol. Reusada tanto desde el drawer ("Cerrar sesion")
+// como desde el boton "Salir" de la pantalla de espera del conductor
+// (necesario porque esa pantalla es de pantalla completa y tapa el
+// menu/topbar, asi que sin este boton no habia forma de volver atras
+// si uno entraba a modo conductor por error o quiere cambiar de rol).
+function cerrarSesion() {
+  localStorage.removeItem(LS_KEY);
+  localStorage.removeItem('rol');
+  localStorage.removeItem('conductor_telefono');
+  localStorage.removeItem('pasajero_telefono');
+  localStorage.removeItem('es_admin');
+  detenerTrackingConductor();
+  if (canalViajeConductor) {
+    supabase.removeChannel(canalViajeConductor);
+    canalViajeConductor = null;
+  }
+  detenerSeguimientoPosicionConductor();
+  detenerListaPendientes();
+  simAutoDetener();
+  conductorTelefonoActual = null;
+  conductorViajeActivo = null;
+  conductorDisponible = false;
+  driverActiveSheet.style.display = 'none';
+  sheet.style.display = '';
+  bloquearApp(true);
+  searchInput.value = '';
+  ocultarResultados();
+  actualizarVisibilidadDevBtn();
+  mostrarOverlay(roleSelectOverlay);
+}
+
+document.getElementById('btn-salir-conductor')?.addEventListener('click', () => {
+  const confirmar = window.confirm('¿Cerrar sesión como conductor y volver a elegir el rol?');
+  if (confirmar) cerrarSesion();
+});
+
 function actualizarToggleUI() {
   toggleDisponible.setAttribute('aria-checked', String(conductorDisponible));
-  driverDisponibleLabel.textContent = conductorDisponible ? 'Disponible' : 'No disponible';
+  driverDisponibleLabel.textContent = conductorDisponible
+    ? 'Conectado — recibiendo viajes'
+    : 'Conectarte para recibir viajes';
   driverPendingEmpty.style.display = conductorDisponible ? 'none' : 'block';
   driverPendingList.style.display = conductorDisponible ? 'flex' : 'none';
 }
@@ -904,7 +943,13 @@ function evaluarViajeConductor(viaje, telefono) {
       // Si el conductor mismo lo finalizo (toco "Finalizar viaje"), ya lo
       // sabe — el aviso es solo para cuando se entera de una cancelacion.
       if (viaje && viaje.estado === 'cancelado') {
-        mostrarToast('El pasajero canceló el viaje ❌', '❌');
+        const tarifa = Number(viaje.tarifa_cancelacion) || 0;
+        mostrarToast(
+          tarifa > 0
+            ? `El pasajero canceló — se le cobró $${tarifa.toLocaleString('es-AR')} por tu tiempo 💰`
+            : 'El pasajero canceló el viaje ❌',
+          tarifa > 0 ? '💰' : '❌',
+        );
       }
       salirDeVistaViajeActiva();
     }
@@ -2003,10 +2048,20 @@ function procesarActualizacionViajePasajero(actualizado) {
     mostrarToast('Viaje iniciado — ¡buen viaje! ▶️', '▶️');
     actualizarControlesDevEnViaje();
   } else if (actualizado.estado === 'cancelado' && estadoAnterior !== 'cancelado') {
-    mostrarToast('El viaje fue cancelado ❌', '❌');
+    const tarifa = Number(actualizado.tarifa_cancelacion) || 0;
+    mostrarToast(
+      tarifa > 0
+        ? `Viaje cancelado — se cobró $${tarifa.toLocaleString('es-AR')} por el tiempo del conductor ❌`
+        : 'El viaje fue cancelado ❌',
+      '❌',
+    );
     buscandoOverlay.classList.remove('show');
+    driverSheet.style.display = 'none';
+    sheet.style.display = 'block';
     viajeActivoPasajero = null;
     simAutoDetener();
+    sincronizarCapaAutoConductor();
+    actualizarControlesDevEnViaje();
     if (canalEsperaAsignacion) {
       supabase.removeChannel(canalEsperaAsignacion);
       canalEsperaAsignacion = null;
@@ -2070,13 +2125,44 @@ document.getElementById('btn-cancelar-busqueda').addEventListener('click', async
   sincronizarCapaAutoConductor();
 });
 
-document.getElementById('btn-cancelar-viaje').addEventListener('click', () => {
-  driverSheet.style.display = 'none';
-  sheet.style.display = 'block';
-  viajeActivoPasajero = null;
-  simAutoDetener();
-  sincronizarCapaAutoConductor();
-  actualizarControlesDevEnViaje();
+document.getElementById('btn-cancelar-viaje').addEventListener('click', async () => {
+  if (!viajeActivoPasajero) {
+    driverSheet.style.display = 'none';
+    sheet.style.display = 'block';
+    simAutoDetener();
+    actualizarControlesDevEnViaje();
+    return;
+  }
+
+  // Este boton solo se ve una vez que ya hay conductor asignado (driver-sheet),
+  // asi que cancelar desde aca siempre implica que el conductor ya invirtio
+  // tiempo yendo hacia el pasajero — se cobra un porcentaje del precio
+  // estimado como compensacion, para que cancelar sin aviso no le haga
+  // perder el viaje gratis al conductor.
+  const precio = Number(viajeActivoPasajero.precio) || 0;
+  const tarifaCancelacion = Math.round(precio * 0.30);
+
+  const confirmar = window.confirm(
+    `Cancelar ahora tiene un cargo del 30% del viaje ($${tarifaCancelacion.toLocaleString('es-AR')}), por el tiempo que ya perdió el conductor viniendo hacia vos.\n\n¿Confirmás la cancelación?`,
+  );
+  if (!confirmar) return;
+
+  const { error } = await supabase
+    .from('viajes')
+    .update({ estado: 'cancelado', tarifa_cancelacion: tarifaCancelacion })
+    .eq('id', viajeActivoPasajero.id);
+
+  if (error) {
+    console.error('[Movi] Error cancelando el viaje:', error);
+    mostrarToast('No se pudo cancelar, intentá de nuevo ❌', '❌');
+    return;
+  }
+
+  // El resto (ocultar driver-sheet, mostrar el mapa de nuevo, avisar con
+  // el toast) lo dispara solo procesarActualizacionViajePasajero() apenas
+  // llegue el eco de este mismo cambio por Realtime — asi hay un solo
+  // lugar en el codigo que decide como reaccionar a un viaje cancelado,
+  // sea que lo cancele el pasajero, el conductor, o el sistema (10 min).
 });
 
 document.getElementById('btn-llamar').addEventListener('click', () => {
@@ -2191,25 +2277,7 @@ document.querySelectorAll('.drawer-item, .drawer [data-item]').forEach((item) =>
     cerrarDrawers();
 
     if (accion === 'cerrar-sesion') {
-      localStorage.removeItem(LS_KEY);
-      localStorage.removeItem('rol');
-      localStorage.removeItem('conductor_telefono');
-      localStorage.removeItem('pasajero_telefono');
-      detenerTrackingConductor();
-      if (canalViajeConductor) {
-        supabase.removeChannel(canalViajeConductor);
-        canalViajeConductor = null;
-      }
-      detenerSeguimientoPosicionConductor();
-      detenerListaPendientes();
-      conductorTelefonoActual = null;
-      conductorViajeActivo = null;
-      driverActiveSheet.style.display = 'none';
-      sheet.style.display = '';
-      bloquearApp(true);
-      searchInput.value = '';
-      ocultarResultados();
-      mostrarOverlay(roleSelectOverlay);
+      cerrarSesion();
     }
 
     if (accion === 'historial') {
