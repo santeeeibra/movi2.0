@@ -16,6 +16,33 @@ Sentry.init({
 
 initMonitoring();
 
+// ==================================================================
+//  Capturador de errores visible EN PANTALLA (temporal, para
+//  diagnosticar sin necesitar herramientas de desarrollador desde el
+//  celular). Muestra cualquier error de JS o promesa rechazada como un
+//  cartel rojo abajo de todo, independiente de cualquier otro sistema
+//  de la app (para que funcione incluso si algo mas esta roto).
+// ==================================================================
+function mostrarErrorEnPantalla(texto) {
+  let el = document.getElementById('debug-error-banner');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'debug-error-banner';
+    el.style.cssText = 'position:fixed;left:8px;right:8px;bottom:8px;z-index:999999;background:#c0392b;color:#fff;padding:12px;border-radius:12px;font-size:11px;font-family:monospace;white-space:pre-wrap;max-height:45vh;overflow:auto;box-shadow:0 4px 20px rgba(0,0,0,0.4);';
+    document.body.appendChild(el);
+  }
+  el.textContent += (el.textContent ? '\n---\n' : '⚠️ ERROR (tocá para copiar todo)\n') + texto;
+  el.onclick = () => {
+    navigator.clipboard?.writeText(el.textContent).catch(() => {});
+  };
+}
+window.addEventListener('error', (e) => {
+  mostrarErrorEnPantalla(`${e.message}\n(archivo: ${e.filename?.split('/').pop() || '?'}, línea ${e.lineno})`);
+});
+window.addEventListener('unhandledrejection', (e) => {
+  mostrarErrorEnPantalla(`Promesa rechazada: ${e.reason?.message || e.reason}`);
+});
+
 // Registro del service worker. Solo en produccion para no interferir con Vite.
 if (import.meta.env.PROD && 'serviceWorker' in navigator) {
   const registrarSW = () => navigator.serviceWorker.register('/service-worker.js');
