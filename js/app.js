@@ -929,6 +929,12 @@ async function entrarAVistaViajeActiva(viaje) {
   mostrarOverlay(null);
   driverWaitingOverlay.classList.remove('show');
   sheet.style.display = 'none'; // el sheet de pasajero no debe verse detras en sesion de conductor
+  // FIX: si en esta misma sesion de navegador ya se uso la app como
+  // pasajero y se llego a ver "Viaje completado" (payment-sheet), ese
+  // sheet queda con display:block colgado en el DOM — sheet.style de
+  // arriba no lo tapa porque es otro elemento. Sin esto se ve apilado
+  // arriba de "Viaje en curso" al entrar en modo conductor.
+  paymentSheet.style.display = 'none';
   driverActiveSheet.style.display = 'block';
 
   const auto = [viaje.modelo_auto_conductor, viaje.color_auto_conductor].filter(Boolean).join(' · ');
@@ -1872,6 +1878,20 @@ function renderParadasPanel() {
 // en el mapa): segun modoBusqueda, agrega una parada nueva o reemplaza el
 // destino final. Despues de procesar, vuelve siempre al modo por defecto.
 function mostrarDestino(lat, lng, direccion) {
+  // FIX: no dejar cambiar destino ni agregar parada si ya hay un viaje
+  // pedido y en curso. Antes esta funcion pisaba destinoActual/paradas
+  // y recalculaba la ruta igual aunque el sheet de pedir viaje ya
+  // estuviera oculto (p. ej. tocando el mapa con el chofer en camino
+  // al origen) — el pasajero terminaba cambiando de destino sin que se
+  // le cobrara ningun recargo, porque esto nunca tocaba el registro
+  // real del viaje en Supabase.
+  const estadoViajeActivo = viajeActivoPasajero?.estado;
+  if (estadoViajeActivo && estadoViajeActivo !== 'cancelado' && estadoViajeActivo !== 'finalizado') {
+    mostrarToast('No podés cambiar el destino con el viaje ya en curso', '🚫');
+    modoBusqueda = null;
+    return;
+  }
+
   const item = { lat, lng, direccion: direccion || '' };
 
   // Aprendizaje de lugares: no bloquea el flujo, solo suma un voto si el
@@ -1909,6 +1929,11 @@ const PRECIO_BASE = 2700;
 const PRECIO_POR_KM = 1700;
 const PRECIO_POR_MINUTO = 150;
 
+function esHorarioNocturno() {
+  const hora = new Date().getHours();
+  return hora >= 21 || hora < 6;
+}
+
 const ENVIO_BASE = 1500;
 const ENVIO_POR_KM = 1100;
 
@@ -1924,8 +1949,14 @@ async function recalcularRuta() {
   const minutosTexto = Math.round(ruta.minutos);
   document.getElementById('ride-sub-normal').textContent = `${minutosTexto} min · ${ruta.km.toFixed(1)} km`;
 
-  const precio = Math.round(PRECIO_BASE + ruta.km * PRECIO_POR_KM + ruta.minutos * PRECIO_POR_MINUTO);
+  const nocturno = esHorarioNocturno();
+  const multiplicador = nocturno ? 1.3 : 1;
+
+  const precio = Math.round((PRECIO_BASE + ruta.km * PRECIO_POR_KM + ruta.minutos * PRECIO_POR_MINUTO) * multiplicador);
   document.getElementById('ride-price-normal').textContent = `$ ${precio.toLocaleString('es-AR')}`;
+
+  const badgeEl = document.getElementById('recargo-nocturno');
+  if (badgeEl) badgeEl.style.display = nocturno ? 'inline' : 'none';
 
   const precioEnvio = Math.round(ENVIO_BASE + ruta.km * ENVIO_POR_KM);
   const elPrecioEnvio = document.getElementById('ride-price-envios');

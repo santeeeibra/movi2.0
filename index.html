@@ -122,7 +122,7 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 13l1.5-5A2 2 0 0 1 6.4 6.5h11.2a2 2 0 0 1 1.9 1.5L21 13"/><rect x="2.5" y="13" width="19" height="5.5" rx="1.5"/><circle cx="7" cy="18.5" r="1.6"/><circle cx="17" cy="18.5" r="1.6"/></svg>
       </div>
       <div>
-        <div class="ride-name">Viaje normal</div>
+        <div class="ride-name">Viaje normal <span class="recargo-nocturno" id="recargo-nocturno" style="display:none;">+30%</span></div>
         <div class="ride-sub" id="ride-sub-normal">Elegí un destino primero</div>
       </div>
       <div class="ride-price" id="ride-price-normal">$ —</div>
@@ -377,18 +377,7 @@
 
       <div class="login-field">
         <label class="login-label" for="conductor-color">Color del auto</label>
-        <div class="color-chip-row" id="conductor-color-row">
-          <div class="color-chip" data-color="Rojo" style="--chip-color:#D64545"></div>
-          <div class="color-chip" data-color="Azul" style="--chip-color:#3B6FD6"></div>
-          <div class="color-chip" data-color="Gris" style="--chip-color:#8C8C8C"></div>
-          <div class="color-chip" data-color="Negro" style="--chip-color:#1A1A1A"></div>
-          <div class="color-chip" data-color="Blanco" style="--chip-color:#F2F2F2;border:1px solid #ddd"></div>
-          <div class="color-chip" data-color="Verde" style="--chip-color:#1F8A4C"></div>
-          <div class="color-chip" data-color="Violeta" style="--chip-color:#8B5CF6"></div>
-          <div class="color-chip" data-color="Celeste" style="--chip-color:#38BDF8"></div>
-          <div class="color-chip" data-color="Amarillo" style="--chip-color:#FACC15"></div>
-          <div class="color-chip" data-color="Naranja" style="--chip-color:#F97316"></div>
-        </div>
+        <input class="login-input" id="conductor-color" type="text" placeholder="Ej: Gris" />
       </div>
 
       <button class="cta" id="btn-guardar-conductor">
