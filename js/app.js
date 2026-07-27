@@ -236,6 +236,38 @@ function mostrarToast(texto, icono = '🔔', duracionMs = 4500) {
   }, duracionMs);
 }
 
+// ==================================================================
+//  Confirmacion propia (reemplaza window.confirm): algunos navegadores
+//  mobile, sobre todo en modo PWA instalada/standalone, bloquean o
+//  ignoran en silencio los dialogos nativos (confirm/alert/prompt) —
+//  el boton que los dispara queda pareciendo que "no hace nada". Este
+//  modal esta dibujado dentro de la app, asi que siempre funciona.
+// ==================================================================
+const confirmOverlay = document.getElementById('confirm-overlay');
+const confirmTexto = document.getElementById('confirm-texto');
+const confirmBtnSi = document.getElementById('confirm-btn-si');
+const confirmBtnNo = document.getElementById('confirm-btn-no');
+
+function mostrarConfirm(texto, textoConfirmar = 'Confirmar', textoCancelar = 'Cancelar') {
+  return new Promise((resolve) => {
+    confirmTexto.textContent = texto;
+    confirmBtnSi.textContent = textoConfirmar;
+    confirmBtnNo.textContent = textoCancelar;
+    confirmOverlay.classList.add('show');
+
+    function limpiar() {
+      confirmOverlay.classList.remove('show');
+      confirmBtnSi.removeEventListener('click', onSi);
+      confirmBtnNo.removeEventListener('click', onNo);
+    }
+    function onSi() { limpiar(); resolve(true); }
+    function onNo() { limpiar(); resolve(false); }
+
+    confirmBtnSi.addEventListener('click', onSi);
+    confirmBtnNo.addEventListener('click', onNo);
+  });
+}
+
 function ocultarLoginYApp() {
   // Hide map UI elements when showing role screens
   inicioMapa = true; // prevent map init if we're going to show something else
@@ -593,8 +625,8 @@ function cerrarSesion() {
   mostrarOverlay(roleSelectOverlay);
 }
 
-document.getElementById('btn-salir-conductor')?.addEventListener('click', () => {
-  const confirmar = window.confirm('¿Cerrar sesión como conductor y volver a elegir el rol?');
+document.getElementById('btn-salir-conductor')?.addEventListener('click', async () => {
+  const confirmar = await mostrarConfirm('¿Cerrar sesión como conductor y volver a elegir el rol?', 'Cerrar sesión', 'Seguir conectado');
   if (confirmar) cerrarSesion();
 });
 
@@ -2169,8 +2201,10 @@ document.getElementById('btn-cancelar-viaje').addEventListener('click', async ()
   const precio = Number(viajeActivoPasajero.precio) || 0;
   const tarifaCancelacion = Math.round(precio * 0.30);
 
-  const confirmar = window.confirm(
+  const confirmar = await mostrarConfirm(
     `Cancelar ahora tiene un cargo del 30% del viaje ($${tarifaCancelacion.toLocaleString('es-AR')}), por el tiempo que ya perdió el conductor viniendo hacia vos.\n\n¿Confirmás la cancelación?`,
+    'Sí, cancelar',
+    'Volver',
   );
   if (!confirmar) return;
 

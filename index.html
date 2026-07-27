@@ -51,6 +51,20 @@
     <span class="app-toast-texto" id="app-toast-texto"></span>
   </div>
 
+  <!-- ================================================================ -->
+  <!--  Modal de confirmacion propio (reemplaza window.confirm, que      -->
+  <!--  algunos navegadores mobile en modo PWA bloquean/ignoran).        -->
+  <!-- ================================================================ -->
+  <div class="confirm-overlay" id="confirm-overlay">
+    <div class="confirm-card">
+      <div class="confirm-texto" id="confirm-texto"></div>
+      <div class="confirm-botones">
+        <button class="confirm-btn cancelar" id="confirm-btn-no">Cancelar</button>
+        <button class="confirm-btn confirmar" id="confirm-btn-si">Confirmar</button>
+      </div>
+    </div>
+  </div>
+
   <div class="origen-toast" id="origen-toast">
     <div class="origen-toast-texto">Origen movido — confirmá antes de pedir el viaje</div>
     <div class="origen-toast-btns">
