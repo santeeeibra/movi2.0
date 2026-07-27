@@ -969,6 +969,27 @@ async function obtenerPosicionActualConductor() {
   });
 }
 
+// Estilo de la linea de ruta: distingue visualmente el tramo "yendo a
+// buscar al pasajero" (azul, punteado) del tramo real del viaje ya con
+// el pasajero a bordo (verde solido, color de marca). Reutiliza las
+// mismas capas 'ruta-glow'/'ruta-linea' en vez de duplicarlas — como
+// nunca se muestran los dos tramos a la vez, alcanza con cambiar el
+// paint antes de cargar los datos de cada tramo.
+function aplicarEstiloRuta(tipo) {
+  if (!map.getLayer('ruta-linea') || !map.getLayer('ruta-glow')) return;
+
+  if (tipo === 'hacia_pasajero') {
+    map.setPaintProperty('ruta-linea', 'line-color', '#2E7DD7');
+    map.setPaintProperty('ruta-linea', 'line-dasharray', [2, 1.6]);
+    map.setPaintProperty('ruta-glow', 'line-color', '#2E7DD7');
+  } else {
+    // 'viaje': el color de marca de Movi, linea solida.
+    map.setPaintProperty('ruta-linea', 'line-color', '#1F8A4C');
+    map.setPaintProperty('ruta-linea', 'line-dasharray', [1, 0]);
+    map.setPaintProperty('ruta-glow', 'line-color', '#ffffff');
+  }
+}
+
 async function dibujarRutaConductorHaciaOrigen(viaje) {
   const posActual = await obtenerPosicionActualConductor();
   if (!posActual) return;
@@ -977,6 +998,7 @@ async function dibujarRutaConductorHaciaOrigen(viaje) {
   const ruta = await getRuta([posActual, destino]);
   if (!ruta || !map.getSource('ruta')) return;
 
+  aplicarEstiloRuta('hacia_pasajero');
   map.getSource('ruta').setData({ type: 'Feature', properties: {}, geometry: ruta.geometry });
   rutaGeometriaActual = ruta.geometry?.coordinates || null;
   window._iniciarAnimacionGlow?.();
@@ -1001,6 +1023,7 @@ async function dibujarRutaConductorViajeCompleto(viaje) {
   const ruta = await getRuta(puntos);
   if (!ruta || !map.getSource('ruta')) return;
 
+  aplicarEstiloRuta('viaje');
   map.getSource('ruta').setData({ type: 'Feature', properties: {}, geometry: ruta.geometry });
   rutaGeometriaActual = ruta.geometry?.coordinates || null;
   window._iniciarAnimacionGlow?.();
@@ -1305,13 +1328,23 @@ map.on('load', () => {
     19, ['literal', [5, 5, 5]],
   ];
 
+  // FIX auto "de cola": el .glb (sedan-sports de Kenney) tiene el frente
+  // modelado hacia el eje opuesto al que espera calcularRumbo (0=Norte,
+  // sentido horario), asi que el heading crudo lo deja mirando para
+  // atras. Offset fijo de 180 grados para compensar. Si despues de
+  // probarlo en el mapa el auto sigue girado (aunque ya no "de cola"),
+  // probar 90 o -90 aca antes que nada — es la unica constante que hay
+  // que tocar, las 4 capas la reutilizan.
+  const AUTO_MODEL_ROTATION_OFFSET = 180;
+  const AUTO_MODEL_ROTATION = [0, 0, ['+', ['get', 'heading'], AUTO_MODEL_ROTATION_OFFSET]];
+
   map.addLayer({
     id: 'auto-wheels',
     type: 'model',
     source: 'auto-conductor',
     layout: { 'model-id': 'auto-wheels-modelo' },
     paint: {
-      'model-rotation': [0, 0, ['get', 'heading']],
+      'model-rotation': AUTO_MODEL_ROTATION,
       'model-scale': AUTO_MODEL_SCALE,
       'model-color-mix-intensity': 0,
       'model-cast-shadows': true,
@@ -1324,7 +1357,7 @@ map.on('load', () => {
     source: 'auto-conductor',
     layout: { 'model-id': 'auto-trim-modelo' },
     paint: {
-      'model-rotation': [0, 0, ['get', 'heading']],
+      'model-rotation': AUTO_MODEL_ROTATION,
       'model-scale': AUTO_MODEL_SCALE,
       'model-color-mix-intensity': 0,
       'model-cast-shadows': true,
@@ -1337,7 +1370,7 @@ map.on('load', () => {
     source: 'auto-conductor',
     layout: { 'model-id': 'auto-lights-modelo' },
     paint: {
-      'model-rotation': [0, 0, ['get', 'heading']],
+      'model-rotation': AUTO_MODEL_ROTATION,
       'model-scale': AUTO_MODEL_SCALE,
       'model-color-mix-intensity': 0,
       'model-cast-shadows': true,
@@ -1350,7 +1383,7 @@ map.on('load', () => {
     source: 'auto-conductor',
     layout: { 'model-id': 'auto-paint-modelo' },
     paint: {
-      'model-rotation': [0, 0, ['get', 'heading']],
+      'model-rotation': AUTO_MODEL_ROTATION,
       'model-scale': AUTO_MODEL_SCALE,
       'model-color': ['get', 'colorHex'],
       'model-color-mix-intensity': 1,
@@ -1898,6 +1931,7 @@ async function recalcularRuta() {
   const elPrecioEnvio = document.getElementById('ride-price-envios');
   if (elPrecioEnvio) elPrecioEnvio.textContent = `$ ${precioEnvio.toLocaleString('es-AR')}`;
 
+  aplicarEstiloRuta('viaje');
   if (map.getSource('ruta')) {
     map.getSource('ruta').setData({ type: 'Feature', properties: {}, geometry: ruta.geometry });
   }
