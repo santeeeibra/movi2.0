@@ -15,12 +15,33 @@ function distanciaAproximada(lng, lat) {
   return Math.sqrt(dLat * dLat + dLng * dLng);
 }
 
-async function buscarConBBox(query, bbox) {
+// ==================================================================
+//  Busqueda de intersecciones ("RIVADAVIA Y GUIDO", "Rivadavia
+//  esquina Guido"). Mapbox Geocoding v5 tiene soporte NATIVO para
+//  cruces de calles: si separas los dos nombres con "and" o "&" (en
+//  ingles, literal, asi lo espera la API sin importar el idioma de
+//  busqueda), y usas types=address, te devuelve el punto exacto del
+//  cruce con accuracy:"intersection". Lo unico que hace falta es
+//  detectar el patron en español ("Y" / "esquina") y traducirlo a ese
+//  formato antes de mandar la consulta.
+// ==================================================================
+const PATRON_INTERSECCION = /^(.+?)\s+(?:y|esquina(?:\s+con)?)\s+(.+)$/i;
+
+function detectarInterseccion(texto) {
+  const match = texto.match(PATRON_INTERSECCION);
+  if (!match) return null;
+  const calle1 = match[1].trim();
+  const calle2 = match[2].trim();
+  if (!calle1 || !calle2) return null;
+  return { calle1, calle2, consulta: `${calle1} and ${calle2}` };
+}
+
+async function buscarConBBox(query, bbox, tipos = 'address,poi') {
   const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(query)}.json`
     + `?access_token=${MAPBOX_TOKEN}`
     + `&bbox=${bbox.join(',')}`
     + `&proximity=${VIEDMA_CENTER.join(',')}`
-    + `&types=address,poi`
+    + `&types=${tipos}`
     + `&language=es`
     + `&limit=5`;
 
@@ -37,14 +58,23 @@ export async function searchMapbox(query) {
   const texto = (query || '').trim();
   if (!texto) return [];
 
-  let features = await buscarConBBox(texto, VIEDMA_BBOX);
+  const interseccion = detectarInterseccion(texto);
+  const textoConsulta = interseccion ? interseccion.consulta : texto;
+  // Intersection search de Mapbox solo funciona con types=address (asi
+  // lo pide la documentacion) — mezclar poi puede hacer que no matchee.
+  const tipos = interseccion ? 'address' : 'address,poi';
+
+  let features = await buscarConBBox(textoConsulta, VIEDMA_BBOX, tipos);
   if (features.length === 0) {
-    features = await buscarConBBox(texto, REGION_BBOX);
+    features = await buscarConBBox(textoConsulta, REGION_BBOX, tipos);
   }
 
   return features
     .map((f) => ({
-      nombre: f.text ?? f.place_name,
+      // Para intersecciones, mostramos el nombre en español tal como
+      // el usuario lo escribio, no el "and" en ingles que le mandamos
+      // a la API por dentro.
+      nombre: interseccion ? `${interseccion.calle1} y ${interseccion.calle2}` : (f.text ?? f.place_name),
       direccion: f.place_name,
       lng: f.center[0],
       lat: f.center[1],
