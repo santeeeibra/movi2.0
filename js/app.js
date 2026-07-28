@@ -596,18 +596,19 @@ btnGuardarConductor.addEventListener('click', async () => {
   localStorage.setItem('rol', 'conductor');
   localStorage.setItem('conductor_telefono', telefono);
 
-  // El admin de prueba se salta la verificacion por SMS (no es un
-  // conductor real, es la cuenta que usamos nosotros para testear).
+  // FASE BETA: verificacion por SMS desactivada para todos los
+  // conductores (Twilio trial no manda SMS a numeros no verificados).
+  // Para reactivarla mas adelante, restaurar el bloque original de git.
   if (esAdminConductor) {
     localStorage.setItem('es_admin', 'true');
     actualizarVisibilidadDevBtn();
-    btnGuardarConductor.textContent = '¡Listo!';
-    mostrarOverlay(driverWaitingOverlay);
-    btnGuardarConductor.disabled = false;
-    btnGuardarConductor.textContent = 'Ingresar';
-    iniciarSupervisionViajeConductor(telefono);
-    return;
   }
+  btnGuardarConductor.textContent = '¡Listo!';
+  mostrarOverlay(driverWaitingOverlay);
+  btnGuardarConductor.disabled = false;
+  btnGuardarConductor.textContent = 'Ingresar';
+  iniciarSupervisionViajeConductor(telefono);
+  return;
 
   // Conductor real: antes de dejarlo entrar, verificamos que el
   // telefono es suyo de verdad con un codigo por SMS.
