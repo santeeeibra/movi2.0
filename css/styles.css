@@ -845,6 +845,11 @@ body {
   font-weight: 600;
   font-size: 13px;
   color: #ffffff;
+  opacity: 0;
+  animation: paradaFadeIn 0.22s ease-out forwards;
+}
+@keyframes paradaFadeIn {
+  to { opacity: 1; }
 }
 /* La ultima parada (destino final) se distingue en verde */
 .parada-marker.parada-marker-final {
@@ -860,11 +865,16 @@ body {
   width: 22px;
   height: 7px;
   margin-top: 2px;
-  transform: translateX(-50%);
+  transform: translateX(-50%) scale(1);
   border-radius: 50%;
   background: rgba(0, 0, 0, 0.18);
   filter: blur(3px);
   z-index: -2;
+  animation: paradaSombraAterriza 0.32s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+@keyframes paradaSombraAterriza {
+  0% { transform: translateX(-50%) scale(0); opacity: 0; }
+  100% { transform: translateX(-50%) scale(1); opacity: 1; }
 }
 
 .comment-input:focus { outline: 2px solid var(--verde); }
@@ -1518,6 +1528,16 @@ body {
   border-radius: 18px;
   padding: 14px;
   background: rgba(255, 255, 255, 0.6);
+  opacity: 0;
+  transform: translateY(6px) scale(0.98);
+  animation: pendingCardEntrada var(--dur-popover) var(--ease-out) forwards;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+.driver-pending-card:active {
+  transform: scale(0.98);
+}
+@keyframes pendingCardEntrada {
+  to { opacity: 1; transform: translateY(0) scale(1); }
 }
 .driver-pending-ruta {
   font-size: 13.5px;
