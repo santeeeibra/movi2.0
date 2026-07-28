@@ -257,6 +257,7 @@ function bloquearApp(bloqueado) {
 // ==================================================================
 const roleSelectOverlay = document.getElementById('role-select-overlay');
 const conductorFormOverlay = document.getElementById('conductor-form-overlay');
+const conductorVerificarOverlay = document.getElementById('conductor-verificar-overlay');
 const driverWaitingOverlay = document.getElementById('driver-waiting-overlay');
 
 const btnSoyPasajero = document.getElementById('btn-soy-pasajero');
@@ -300,10 +301,54 @@ colorChipRow?.addEventListener('click', (e) => {
 });
 
 function mostrarOverlay(el) {
-  [roleSelectOverlay, loginOverlay, conductorFormOverlay, driverWaitingOverlay]
+  [roleSelectOverlay, loginOverlay, conductorFormOverlay, conductorVerificarOverlay, driverWaitingOverlay]
     .forEach(o => o.classList.remove('show'));
   if (el) el.classList.add('show');
 }
+
+// ==================================================================
+//  Verificacion de telefono por SMS (Twilio Verify via Supabase Edge
+//  Functions "enviar-codigo" / "verificar-codigo"). Ver CLAUDE.md.
+// ==================================================================
+const SUPABASE_FUNCTIONS_URL = 'https://lapnbdpdkkeaaavvkfqc.supabase.co/functions/v1';
+
+async function enviarCodigoSMS(telefono) {
+  try {
+    const res = await fetch(`${SUPABASE_FUNCTIONS_URL}/enviar-codigo`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ telefono }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      return { ok: false, error: data.error || 'No se pudo enviar el codigo' };
+    }
+    return { ok: true };
+  } catch (err) {
+    console.error('[Movi] Error de red enviando codigo SMS:', err);
+    return { ok: false, error: 'Sin conexion. Revisá tu internet e intentá de nuevo.' };
+  }
+}
+
+async function verificarCodigoSMS(telefono, codigo) {
+  try {
+    const res = await fetch(`${SUPABASE_FUNCTIONS_URL}/verificar-codigo`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ telefono, codigo }),
+    });
+    const data = await res.json();
+    if (!res.ok || !data.ok) {
+      return { ok: false, error: data.error || 'Código incorrecto o vencido' };
+    }
+    return { ok: true };
+  } catch (err) {
+    console.error('[Movi] Error de red verificando codigo SMS:', err);
+    return { ok: false, error: 'Sin conexion. Revisá tu internet e intentá de nuevo.' };
+  }
+}
+
+let telefonoConductorPendienteVerificar = null;
 
 // FIX: estos dos botones tienen el HTML/CSS desde hace rato (Fase 0),
 // pero nunca llegaron a tener el addEventListener enganchado — se
@@ -550,16 +595,84 @@ btnGuardarConductor.addEventListener('click', async () => {
   // Persistir rol + teléfono
   localStorage.setItem('rol', 'conductor');
   localStorage.setItem('conductor_telefono', telefono);
+
+  // El admin de prueba se salta la verificacion por SMS (no es un
+  // conductor real, es la cuenta que usamos nosotros para testear).
   if (esAdminConductor) {
     localStorage.setItem('es_admin', 'true');
     actualizarVisibilidadDevBtn();
+    btnGuardarConductor.textContent = '¡Listo!';
+    mostrarOverlay(driverWaitingOverlay);
+    btnGuardarConductor.disabled = false;
+    btnGuardarConductor.textContent = 'Ingresar';
+    iniciarSupervisionViajeConductor(telefono);
+    return;
   }
 
-  btnGuardarConductor.textContent = '¡Listo!';
-  mostrarOverlay(driverWaitingOverlay);
+  // Conductor real: antes de dejarlo entrar, verificamos que el
+  // telefono es suyo de verdad con un codigo por SMS.
+  telefonoConductorPendienteVerificar = telefono;
+  const envio = await enviarCodigoSMS(telefono);
+
   btnGuardarConductor.disabled = false;
   btnGuardarConductor.textContent = 'Ingresar';
-  iniciarSupervisionViajeConductor(telefono);
+
+  if (!envio.ok) {
+    conductorMsg.textContent = envio.error;
+    conductorMsg.style.color = '#C0392B';
+    return;
+  }
+
+  conductorVerificarSub.textContent = `Te mandamos un código por SMS al ${telefono}`;
+  conductorVerificarMsg.textContent = '';
+  conductorCodigoInput.value = '';
+  mostrarOverlay(conductorVerificarOverlay);
+});
+
+// Referencias de la pantalla de verificacion de codigo
+const conductorVerificarSub = document.getElementById('conductor-verificar-sub');
+const conductorCodigoInput = document.getElementById('conductor-codigo');
+const conductorVerificarMsg = document.getElementById('conductor-verificar-msg');
+const btnVerificarCodigo = document.getElementById('btn-verificar-codigo');
+
+btnVerificarCodigo.addEventListener('click', async () => {
+  const codigo = conductorCodigoInput.value.trim();
+  if (!codigo) {
+    conductorVerificarMsg.textContent = 'Ingresá el código que te llegó';
+    conductorVerificarMsg.style.color = '#C0392B';
+    return;
+  }
+
+  btnVerificarCodigo.disabled = true;
+  btnVerificarCodigo.textContent = 'Verificando...';
+  conductorVerificarMsg.textContent = '';
+
+  const resultado = await verificarCodigoSMS(telefonoConductorPendienteVerificar, codigo);
+
+  btnVerificarCodigo.disabled = false;
+  btnVerificarCodigo.textContent = 'Verificar';
+
+  if (!resultado.ok) {
+    conductorVerificarMsg.textContent = resultado.error;
+    conductorVerificarMsg.style.color = '#C0392B';
+    return;
+  }
+
+  mostrarOverlay(driverWaitingOverlay);
+  iniciarSupervisionViajeConductor(telefonoConductorPendienteVerificar);
+});
+
+document.getElementById('btn-reenviar-codigo')?.addEventListener('click', async () => {
+  if (!telefonoConductorPendienteVerificar) return;
+  conductorVerificarMsg.style.color = '';
+  conductorVerificarMsg.textContent = 'Reenviando...';
+  const envio = await enviarCodigoSMS(telefonoConductorPendienteVerificar);
+  conductorVerificarMsg.textContent = envio.ok ? 'Código reenviado.' : envio.error;
+  conductorVerificarMsg.style.color = envio.ok ? '#1F8A4C' : '#C0392B';
+});
+
+document.getElementById('btn-atras-verificar')?.addEventListener('click', () => {
+  mostrarOverlay(conductorFormOverlay);
 });
 
 const TELEFONO_ADMIN = '2920605208';
