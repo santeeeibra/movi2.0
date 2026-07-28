@@ -2112,9 +2112,9 @@ function mostrarDestino(lat, lng, direccion) {
 //  un pasajero, y suele ser mas rapido/directo), sin componente por
 //  minuto (no importa si hay trafico para el paquete en si).
 // ==================================================================
-const PRECIO_BASE = 1500;
-const PRECIO_POR_KM = 1200;
-const PRECIO_POR_MINUTO = 100;
+const PRECIO_BASE = 2700;
+const PRECIO_POR_KM = 1700;
+const PRECIO_POR_MINUTO = 150;
 
 function esHorarioNocturno() {
   const hora = new Date().getHours();
@@ -2548,22 +2548,12 @@ function procesarActualizacionViajePasajero(actualizado) {
     actualizarControlesDevEnViaje();
     mostrarToast(`${actualizado.nombre_conductor || 'Tu conductor'} está en camino 🚗`, '🚗');
 
-    // En modo admin (testing), como no hay un conductor real
-    // mandando su GPS, arrancamos nosotros mismos una simulacion de
-    // acercamiento hacia el origen real de este viaje, para poder
-    // seguir probando el resto de las pantallas sin depender de un
-    // segundo dispositivo.
-    if (esAdmin()) {
-      const puntoPartida = {
-        lat: actualizado.origen_lat - 0.0055,
-        lng: actualizado.origen_lng - 0.0005,
-      };
-      simAutoIniciar(
-        [puntoPartida, { lat: actualizado.origen_lat, lng: actualizado.origen_lng }],
-        actualizado.conductor_telefono,
-        null,
-      );
-    }
+    // FIX: esto se disparaba solo con solo tener es_admin=true guardado
+    // en el celular (por ejemplo, de una prueba vieja con admin/admin),
+    // tapando el GPS real del conductor con un auto de mentira cerca del
+    // punto de partida del pasajero — sin avisar que era una simulacion.
+    // Ahora la simulacion de acercamiento solo arranca si se toca a
+    // proposito el boton de desarrollador (ver devBtnSimularOrigen).
   } else if (actualizado.estado === 'llegó' && estadoAnterior !== 'llegó') {
     mostrarToast('Tu conductor llegó al punto de encuentro 📍', '📍');
     actualizarControlesDevEnViaje();
