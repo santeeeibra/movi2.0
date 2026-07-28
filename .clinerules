@@ -1,0 +1,37 @@
+# Reglas para Cline en este proyecto (Movi)
+
+## Commit y push automático — SOLO si los chequeos pasan
+
+Al terminar cualquier tarea (arreglar un bug, agregar algo, tocar el
+código), antes de dar la tarea por terminada:
+
+1. Correr `npx eslint .` y `npx vite build`.
+2. Si CUALQUIERA de los dos tira error: NO hacer commit ni push. Avisar
+   qué falló y esperar instrucciones.
+3. Si los dos salen limpios (0 errores): hacer `git add -A`,
+   `git commit` con un mensaje descriptivo (ver formato abajo), y
+   `git push`.
+
+Este proyecto se despliega solo a producción (Vercel) en cada push a
+main — por eso el paso 2 es innecesable de saltear, nunca commitear
+con chequeos en rojo.
+
+## Formato del mensaje de commit
+
+Una sola línea, en español, tiempo presente, describiendo QUÉ cambia y
+en qué pantalla/función — no "arreglos varios" ni "cambios". Ejemplos
+buenos:
+
+- Corrige seleccion de color de auto en registro de conductor
+- Conecta verificacion de telefono por SMS en login de pasajero
+- Agrega recargo nocturno al calculo de tarifa
+
+Si el cambio toca varios archivos relacionados a una sola cosa, un
+commit alcanza. Si son dos cosas sin relacion, dos commits separados
+(no mezclar un fix de bug con una funcionalidad nueva en el mismo
+commit).
+
+## Antes de cada cambio (recordatorio del CLAUDE.md)
+
+Un cambio chico por vez, probado en el celular antes de seguir. No
+repetir el error de ediciones grandes de golpe sin verificar.

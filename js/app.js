@@ -2112,9 +2112,9 @@ function mostrarDestino(lat, lng, direccion) {
 //  un pasajero, y suele ser mas rapido/directo), sin componente por
 //  minuto (no importa si hay trafico para el paquete en si).
 // ==================================================================
-const PRECIO_BASE = 2700;
-const PRECIO_POR_KM = 1700;
-const PRECIO_POR_MINUTO = 150;
+const PRECIO_BASE = 1500;
+const PRECIO_POR_KM = 1200;
+const PRECIO_POR_MINUTO = 100;
 
 function esHorarioNocturno() {
   const hora = new Date().getHours();
