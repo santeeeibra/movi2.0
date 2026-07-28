@@ -103,6 +103,7 @@ const btnAgregarParada = document.getElementById('btn-agregar-parada');
 const btnModificarDestino = document.getElementById('btn-modificar-destino');
 const btnVerParadas = document.getElementById('btn-ver-paradas');
 const paradasCount = document.getElementById('paradas-count');
+const paradasFloatBar = document.getElementById('paradas-float-bar');
 const paradasOverlay = document.getElementById('paradas-overlay');
 const paradasPanelList = document.getElementById('paradas-panel-list');
 const btnCerrarParadas = document.getElementById('btn-cerrar-paradas');
@@ -239,6 +240,15 @@ function aplicarUsuarioEnPerfil(usuario) {
     avatar.textContent = usuario.nombre.charAt(0).toUpperCase();
     nombreEl.textContent = usuario.nombre;
     if (emailEl) emailEl.style.display = 'none';
+  }
+
+  // Cabecera de perfil dentro del menu (drawer izquierdo): misma info,
+  // reflejada tambien ahi para que ambos drawers queden consistentes.
+  const menuAvatar = document.querySelector('#menu-profile-card .menu-profile-avatar');
+  const menuNombre = document.querySelector('#menu-profile-card .menu-profile-name');
+  if (usuario && menuAvatar && menuNombre) {
+    menuAvatar.textContent = usuario.nombre.charAt(0).toUpperCase();
+    menuNombre.textContent = usuario.nombre;
   }
 }
 
@@ -1978,6 +1988,7 @@ function sincronizarDestinoActual() {
   btnModificarDestino.disabled = !destinoActual;
   btnVerParadas.disabled = paradas.length === 0;
   paradasCount.textContent = String(paradas.length);
+  paradasFloatBar.classList.toggle('show', !!destinoActual);
 }
 
 function ajustarMapaAParadas() {
@@ -2865,7 +2876,7 @@ document.getElementById('btn-chatear').addEventListener('click', () => {
 //  Arrastrar el sheet hacia abajo para minimizarlo, hacia arriba
 //  para expandirlo. Generico: sirve para #sheet y #driver-sheet.
 // ==================================================================
-function hacerArrastrable(sheetEl) {
+function hacerArrastrable(sheetEl, linkedEl) {
   const handle = sheetEl.querySelector('.sheet-handle-zone');
   if (!handle) return;
 
@@ -2897,6 +2908,7 @@ function hacerArrastrable(sheetEl) {
     const delta = e.clientY - startY;
     const nuevoY = Math.max(0, startTransform + delta);
     sheetEl.style.transform = `translateY(${nuevoY}px)`;
+    if (linkedEl) linkedEl.style.transform = `translateY(${nuevoY}px)`;
   });
 
   function terminarArrastre(e) {
@@ -2928,13 +2940,14 @@ function hacerArrastrable(sheetEl) {
       }
     }
     sheetEl.style.transform = '';
+    if (linkedEl) linkedEl.style.transform = '';
   }
 
   handle.addEventListener('pointerup', terminarArrastre);
   handle.addEventListener('pointercancel', terminarArrastre);
 }
 
-hacerArrastrable(sheet);
+hacerArrastrable(sheet, paradasFloatBar);
 hacerArrastrable(driverSheet);
 
 // ==================================================================
@@ -2962,6 +2975,9 @@ document.getElementById('btn-perfil').addEventListener('click', () => abrirDrawe
 document.getElementById('btn-cerrar-menu').addEventListener('click', cerrarDrawers);
 document.getElementById('btn-cerrar-perfil').addEventListener('click', cerrarDrawers);
 drawerOverlay.addEventListener('click', cerrarDrawers);
+
+// Cabecera de perfil del menu: tocarla lleva directo al drawer de perfil.
+document.getElementById('menu-profile-card').addEventListener('click', () => abrirDrawer(perfilDrawer));
 
 // TODO: cuando exista login, leer aca la direccion guardada real del
 // usuario para los items 'casa' / 'trabajo' del drawer de perfil, en vez
