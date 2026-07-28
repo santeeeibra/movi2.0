@@ -177,7 +177,7 @@ body {
     0 -10px 40px rgba(43, 38, 33, 0.14),
     inset 0 1px 0 rgba(255, 255, 255, 0.8);
   transition: transform var(--dur-sheet) var(--ease-drawer);
-  touch-action: none;
+  touch-action: pan-y;
 }
 .sheet.dragging { transition: none; }
 .sheet.collapsed { transform: translateY(calc(100% - 120px)); }
@@ -185,6 +185,7 @@ body {
   padding: 10px 0 4px;
   margin: -10px 0 0;
   cursor: grab;
+  touch-action: none;
 }
 .sheet-handle {
   width: 40px;
