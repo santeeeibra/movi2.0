@@ -394,6 +394,8 @@ function mostrarToast(texto, icono = '🔔', duracionMs = 4500) {
   appToast.classList.remove('hiding');
   appToastIcon.textContent = icono;
   appToastTexto.textContent = texto;
+  appToast.classList.remove('show');
+  void appToast.offsetWidth;
   appToast.classList.add('show');
 
   appToastTimeoutId = setTimeout(() => {
