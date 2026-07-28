@@ -67,22 +67,26 @@ export default async function handler(req, res) {
     return;
   }
 
-  // Diagnostico: guardamos que paso con cada espejo, aunque alguno
-  // funcione, para poder ver en la consola del navegador si Overpass
-  // esta tardando/bloqueando desde el servidor de Vercel.
-  const diagnostico = [];
+  // FIX: antes se probaba un espejo, se esperaba hasta 6s, y si fallaba
+  // recien ahi se pasaba al siguiente -> en el peor caso (los 3 tardan o
+  // se cuelgan) esto sumaba hasta 18s. El navegador (y el limite de
+  // tiempo de ejecucion de Vercel) cortaban la espera antes de que
+  // termine, y la funcion nunca llegaba a devolver nada. Ahora se
+  // preguntan los 3 espejos AL MISMO TIEMPO: el tiempo total pasa a ser
+  // como mucho ~6s (lo que tarde el mas lento), no la suma de los 3.
+  const inicio = Date.now();
+  const resultados = await Promise.all(
+    OVERPASS_URLS.map((url) => consultarOverpass(url, query).then((r) => ({ url, ...r, ms: Date.now() - inicio }))),
+  );
 
-  for (const url of OVERPASS_URLS) {
-    const inicio = Date.now();
-    const resultado = await consultarOverpass(url, query);
-    const ms = Date.now() - inicio;
+  const diagnostico = resultados.map((r) => (
+    r.json ? { url: r.url, ok: true, ms: r.ms } : { url: r.url, ok: false, ms: r.ms, motivo: r.fallo }
+  ));
 
-    if (resultado.json) {
-      diagnostico.push({ url, ok: true, ms });
-      res.status(200).json({ ...resultado.json, _diagnostico: diagnostico });
-      return;
-    }
-    diagnostico.push({ url, ok: false, ms, motivo: resultado.fallo });
+  const exitoso = resultados.find((r) => r.json);
+  if (exitoso) {
+    res.status(200).json({ ...exitoso.json, _diagnostico: diagnostico });
+    return;
   }
 
   // Ninguno de los 3 espejos respondio: devolvemos vacio (no error 500),
