@@ -37,15 +37,16 @@ const PATRON_INTERSECCION = /^(.+?)\s+(?:y|esquina(?:\s+con)?)\s+(.+)$/i;
 //  Mapbox de arriba, pero con mejor cobertura en calles chicas de
 //  Viedma/Patagones que Mapbox no siempre reconoce como cruce).
 // ==================================================================
-// Varios espejos de Overpass: el publico principal a veces no responde
-// (esta saturado o bloquea ciertas redes) y se queda "colgado" sin
-// devolver error. Se prueban en orden, cada uno con tiempo limite propio,
-// en vez de confiar en que el primero siempre conteste.
-const OVERPASS_URLS = [
-  'https://overpass-api.de/api/interpreter',
-  'https://overpass.kumi.systems/api/interpreter',
-  'https://lz4.overpass-api.de/api/interpreter',
-];
+// ==================================================================
+//  FIX CORS: el navegador no puede pegarle directo a los servidores
+//  de Overpass (overpass-api.de y sus espejos) porque esos servidores
+//  no mandan el header Access-Control-Allow-Origin — el navegador
+//  bloquea la respuesta SIEMPRE, no es intermitente, pasa para
+//  cualquier sitio web, no solo Movi. La consulta ahora se hace
+//  contra /api/overpass (funcion serverless propia en api/overpass.js,
+//  mismo origen que la app -> sin problema de CORS), que es la que
+//  por atras prueba los 3 espejos de Overpass server-to-server.
+// ==================================================================
 const OVERPASS_TIMEOUT_MS = 6000;
 
 function bboxOverpass(bbox) {
@@ -59,20 +60,20 @@ function normalizarParaRegex(texto) {
   return texto.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/"/g, '\\"');
 }
 
-async function consultarOverpass(url, query) {
+async function consultarOverpassProxy(query) {
   const controlador = new AbortController();
-  const timeoutId = setTimeout(() => controlador.abort(), OVERPASS_TIMEOUT_MS);
+  const timeoutId = setTimeout(() => controlador.abort(), OVERPASS_TIMEOUT_MS * 3);
   try {
-    const res = await fetch(url, {
+    const res = await fetch('/api/overpass', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: `data=${encodeURIComponent(query)}`,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query }),
       signal: controlador.signal,
     });
     if (!res.ok) return null;
     return await res.json();
   } catch (err) {
-    console.warn(`[Movi] Overpass (${url}) no respondio:`, err.message || err);
+    console.warn('[Movi] /api/overpass no respondio:', err.message || err);
     return null;
   } finally {
     clearTimeout(timeoutId);
@@ -89,11 +90,9 @@ async function buscarInterseccionOSM(calle1, calle2, bbox) {
     + `node(w.a)(w.b);`
     + `out center 1;`;
 
-  for (const url of OVERPASS_URLS) {
-    const json = await consultarOverpass(url, query);
-    const nodo = json?.elements?.find((el) => el.type === 'node');
-    if (nodo) return { lat: nodo.lat, lng: nodo.lon };
-  }
+  const json = await consultarOverpassProxy(query);
+  const nodo = json?.elements?.find((el) => el.type === 'node');
+  if (nodo) return { lat: nodo.lat, lng: nodo.lon };
 
   console.warn(`[Movi] Ninguna interseccion encontrada en OSM para "${calle1}" y "${calle2}"`);
   return null;
