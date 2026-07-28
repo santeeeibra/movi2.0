@@ -95,6 +95,9 @@ async function buscarInterseccionOSM(calle1, calle2, bbox) {
   if (nodo) return { lat: nodo.lat, lng: nodo.lon };
 
   console.warn(`[Movi] Ninguna interseccion encontrada en OSM para "${calle1}" y "${calle2}"`);
+  if (json?._diagnostico) {
+    console.warn('[Movi] Diagnostico Overpass (por que fallo cada espejo):', json._diagnostico);
+  }
   return null;
 }
 

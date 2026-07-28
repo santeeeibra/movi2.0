@@ -22,6 +22,9 @@ const OVERPASS_URLS = [
 ];
 const OVERPASS_TIMEOUT_MS = 6000;
 
+// Devuelve { json } si salio bien, o { fallo: 'motivo corto' } si no. Asi
+// el caller puede armar un reporte de diagnostico con la causa real de
+// cada espejo, en vez de un simple null que no dice nada.
 async function consultarOverpass(url, query) {
   const controlador = new AbortController();
   const timeoutId = setTimeout(() => controlador.abort(), OVERPASS_TIMEOUT_MS);
@@ -32,11 +35,13 @@ async function consultarOverpass(url, query) {
       body: `data=${encodeURIComponent(query)}`,
       signal: controlador.signal,
     });
-    if (!res.ok) return null;
-    return await res.json();
+    if (!res.ok) {
+      const textoError = await res.text().catch(() => '');
+      return { fallo: `HTTP ${res.status}${textoError ? ': ' + textoError.slice(0, 200) : ''}` };
+    }
+    return { json: await res.json() };
   } catch (err) {
-    console.warn(`[Movi] Overpass (${url}) no respondio:`, err.message || err);
-    return null;
+    return { fallo: err.name === 'AbortError' ? 'timeout' : (err.message || String(err)) };
   } finally {
     clearTimeout(timeoutId);
   }
@@ -54,16 +59,26 @@ export default async function handler(req, res) {
     return;
   }
 
+  // Diagnostico: guardamos que paso con cada espejo, aunque alguno
+  // funcione, para poder ver en la consola del navegador si Overpass
+  // esta tardando/bloqueando desde el servidor de Vercel.
+  const diagnostico = [];
+
   for (const url of OVERPASS_URLS) {
-    const json = await consultarOverpass(url, query);
-    if (json) {
-      res.status(200).json(json);
+    const inicio = Date.now();
+    const resultado = await consultarOverpass(url, query);
+    const ms = Date.now() - inicio;
+
+    if (resultado.json) {
+      diagnostico.push({ url, ok: true, ms });
+      res.status(200).json({ ...resultado.json, _diagnostico: diagnostico });
       return;
     }
+    diagnostico.push({ url, ok: false, ms, motivo: resultado.fallo });
   }
 
-  // Ninguno de los 3 espejos respondio: devolvemos vacio en vez de error,
-  // asi el codigo del frontend lo trata igual que "sin resultados" (que
-  // ya sabe manejar) en vez de romperse con un 502/504.
-  res.status(200).json({ elements: [] });
+  // Ninguno de los 3 espejos respondio: devolvemos vacio (no error 500),
+  // asi el frontend lo trata igual que "sin resultados", pero con el
+  // diagnostico adentro para poder ver la causa real en la consola.
+  res.status(200).json({ elements: [], _diagnostico: diagnostico });
 }
