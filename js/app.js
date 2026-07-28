@@ -2126,6 +2126,45 @@ const ENVIO_POR_KM = 1100;
 
 let tipoViajeSeleccionado = 'normal'; // 'normal' | 'envios'
 
+// ==================================================================
+//  Sistema de ofertas/descuentos. precioNormalSinDescuento se guarda
+//  cada vez que recalcularRuta corre, para que aplicarDescuento() tenga
+//  siempre la base correcta sin tener que recalcular la ruta de nuevo.
+//  ofertaActual es la fila de la tabla "ofertas" ya validada (o null).
+// ==================================================================
+let precioNormalSinDescuento = 0;
+let precioEnvioSinDescuento = 0;
+let ofertaActual = null;
+
+function calcularDescuento(precioBase, oferta) {
+  if (oferta.tipo === 'porcentaje') return Math.round(precioBase * oferta.valor / 100);
+  return Math.min(oferta.valor, precioBase);
+}
+
+// Pinta ride-price-normal y ride-price-envios a partir de los precios
+// sin descuento guardados arriba, aplicando ofertaActual si hay una.
+// La llaman recalcularRuta() (cuando cambia la ruta) y aplicarDescuento()
+// / limpiarDescuento() (cuando cambia el código), asi el precio mostrado
+// siempre esta sincronizado con el ultimo estado de ambas cosas.
+function pintarPrecios() {
+  const descuentoNormal = ofertaActual ? calcularDescuento(precioNormalSinDescuento, ofertaActual) : 0;
+  const precioFinalNormal = precioNormalSinDescuento - descuentoNormal;
+  document.getElementById('ride-price-normal').textContent = `$ ${precioFinalNormal.toLocaleString('es-AR')}`;
+
+  const elPrecioEnvio = document.getElementById('ride-price-envios');
+  if (elPrecioEnvio) elPrecioEnvio.textContent = `$ ${precioEnvioSinDescuento.toLocaleString('es-AR')}`;
+
+  const detalleEl = document.getElementById('descuento-detalle');
+  if (detalleEl) {
+    if (ofertaActual && descuentoNormal > 0) {
+      detalleEl.textContent = `Descuento de $${descuentoNormal.toLocaleString('es-AR')} aplicado (${ofertaActual.codigo})`;
+      detalleEl.style.display = 'block';
+    } else {
+      detalleEl.style.display = 'none';
+    }
+  }
+}
+
 async function recalcularRuta() {
   if (!destinoActual || paradas.length === 0) return;
 
@@ -2139,15 +2178,12 @@ async function recalcularRuta() {
   const nocturno = esHorarioNocturno();
   const multiplicador = nocturno ? 1.3 : 1;
 
-  const precio = Math.round((PRECIO_BASE + ruta.km * PRECIO_POR_KM + ruta.minutos * PRECIO_POR_MINUTO) * multiplicador);
-  document.getElementById('ride-price-normal').textContent = `$ ${precio.toLocaleString('es-AR')}`;
+  precioNormalSinDescuento = Math.round((PRECIO_BASE + ruta.km * PRECIO_POR_KM + ruta.minutos * PRECIO_POR_MINUTO) * multiplicador);
+  precioEnvioSinDescuento = Math.round(ENVIO_BASE + ruta.km * ENVIO_POR_KM);
+  pintarPrecios();
 
   const badgeEl = document.getElementById('recargo-nocturno');
   if (badgeEl) badgeEl.style.display = nocturno ? 'inline' : 'none';
-
-  const precioEnvio = Math.round(ENVIO_BASE + ruta.km * ENVIO_POR_KM);
-  const elPrecioEnvio = document.getElementById('ride-price-envios');
-  if (elPrecioEnvio) elPrecioEnvio.textContent = `$ ${precioEnvio.toLocaleString('es-AR')}`;
 
   aplicarEstiloRuta('viaje');
   if (map.getSource('ruta')) {
@@ -2157,6 +2193,104 @@ async function recalcularRuta() {
 
   // Iniciar (o reanudar) la animación del glow ahora que hay ruta
   window._iniciarAnimacionGlow();
+}
+
+// ==================================================================
+//  Ofertas: validar codigo contra Supabase y aplicarlo al precio.
+// ==================================================================
+
+// true si el pasajero (por telefono) todavia no tiene ningun viaje que
+// no haya sido cancelado. Si no hay usuario logueado, se trata como
+// "primer viaje" para no bloquear la promo antes del login.
+async function verificarPrimerViaje(telefono) {
+  if (!telefono) return true;
+
+  const { data, error } = await supabase
+    .from('viajes')
+    .select('id')
+    .eq('telefono_pasajero', telefono)
+    .neq('estado', 'cancelado')
+    .limit(1);
+
+  if (error) {
+    console.error('[Movi] Error verificando primer viaje:', error);
+    return false;
+  }
+  return !data || data.length === 0;
+}
+
+function mostrarErrorDescuento(msg) {
+  const msgEl = document.getElementById('descuento-msg');
+  if (!msgEl) return;
+  msgEl.textContent = msg;
+  msgEl.style.display = 'block';
+  msgEl.classList.add('error');
+}
+
+function limpiarDescuento() {
+  ofertaActual = null;
+  const msgEl = document.getElementById('descuento-msg');
+  if (msgEl) {
+    msgEl.textContent = '';
+    msgEl.style.display = 'none';
+    msgEl.classList.remove('error');
+  }
+  pintarPrecios();
+}
+
+async function aplicarDescuento(codigoIngresado) {
+  const codigo = (codigoIngresado || '').trim().toUpperCase();
+  if (!codigo) {
+    mostrarErrorDescuento('Ingresá un código');
+    return;
+  }
+
+  const { data: oferta, error } = await supabase
+    .from('ofertas')
+    .select('*')
+    .eq('codigo', codigo)
+    .eq('activo', true)
+    .maybeSingle();
+
+  if (error) {
+    console.error('[Movi] Error buscando oferta:', error);
+    mostrarErrorDescuento('No se pudo validar el código, intentá de nuevo');
+    return;
+  }
+
+  if (!oferta) {
+    mostrarErrorDescuento('Código inválido');
+    return;
+  }
+
+  if (oferta.fecha_vencimiento && new Date(oferta.fecha_vencimiento) < new Date()) {
+    mostrarErrorDescuento('Este código venció');
+    return;
+  }
+
+  if (oferta.usos_maximos != null && oferta.usos_actuales >= oferta.usos_maximos) {
+    mostrarErrorDescuento('Este código ya alcanzó el máximo de usos');
+    return;
+  }
+
+  if (oferta.solo_primer_viaje) {
+    const usuarioActual = cargarUsuario();
+    const telefonoPasajero = usuarioActual ? usuarioActual.telefono : '';
+    const esPrimerViaje = await verificarPrimerViaje(telefonoPasajero);
+    if (!esPrimerViaje) {
+      mostrarErrorDescuento('Este código es solo para tu primer viaje');
+      return;
+    }
+  }
+
+  ofertaActual = oferta;
+  const msgEl = document.getElementById('descuento-msg');
+  if (msgEl) {
+    msgEl.textContent = '¡Código aplicado! 🎉';
+    msgEl.style.display = 'block';
+    msgEl.classList.remove('error');
+  }
+  pintarPrecios();
 }
 
 // ==================================================================
@@ -2402,6 +2536,20 @@ paradasOverlay.addEventListener('click', (e) => {
   if (e.target === paradasOverlay) paradasOverlay.classList.remove('show');
 });
 
+// ---- Código de descuento ----
+const codigoDescuentoInput = document.getElementById('codigo-descuento');
+const btnAplicarCodigo = document.getElementById('btn-aplicar-codigo');
+
+if (btnAplicarCodigo && codigoDescuentoInput) {
+  btnAplicarCodigo.addEventListener('click', () => aplicarDescuento(codigoDescuentoInput.value));
+
+  codigoDescuentoInput.addEventListener('input', () => {
+    if (codigoDescuentoInput.value.trim() === '' && ofertaActual) {
+      limpiarDescuento();
+    }
+  });
+}
+
 document.getElementById('btn-pedir-viaje').addEventListener('click', async () => {
   if (!destinoActual) return;
 
@@ -2417,6 +2565,14 @@ document.getElementById('btn-pedir-viaje').addEventListener('click', async () =>
 
   const usuarioActual = cargarUsuario();
   const telefonoPasajero = usuarioActual ? usuarioActual.telefono : '';
+
+  // Si hay una oferta aplicada y el viaje es de tipo "normal" (el
+  // descuento no aplica a envíos), calculamos cuanto se descontó para
+  // dejarlo registrado en el viaje.
+  const codigoOferta = ofertaActual && tipoViajeSeleccionado === 'normal' ? ofertaActual.codigo : null;
+  const descuentoAplicado = codigoOferta
+    ? calcularDescuento(precioNormalSinDescuento, ofertaActual)
+    : null;
 
   // FIX: el insert real no estaba guardando el origen (lat/lng/direccion) —
   // solo lo hacia la simulacion del panel de dev. Sin esto, la lista de
@@ -2438,6 +2594,8 @@ document.getElementById('btn-pedir-viaje').addEventListener('click', async () =>
       origen_lat: origenActual.lat,
       origen_lng: origenActual.lng,
       origen_direccion: origenDireccion,
+      codigo_oferta: codigoOferta,
+      descuento_aplicado: descuentoAplicado,
     })
     .select()
     .single();
@@ -2446,6 +2604,21 @@ document.getElementById('btn-pedir-viaje').addEventListener('click', async () =>
     console.error('[Movi] Error creando viaje en Supabase:', error);
     buscandoOverlay.classList.remove('show', 'visible');
     return;
+  }
+
+  // Si se uso un codigo, sumamos 1 a usos_actuales recien ahora que el
+  // viaje se creo con exito (no antes, para no descontar el cupo si el
+  // insert fallara). No es atomico (podria haber una carrera si dos
+  // personas usan el mismo codigo al mismo milisegundo), pero para el
+  // volumen de Movi hoy es una ventana aceptable.
+  if (codigoOferta && ofertaActual) {
+    const { error: errorOferta } = await supabase
+      .from('ofertas')
+      .update({ usos_actuales: ofertaActual.usos_actuales + 1 })
+      .eq('id', ofertaActual.id);
+    if (errorOferta) {
+      console.error('[Movi] Error actualizando usos_actuales de la oferta:', errorOferta);
+    }
   }
 
   viajeActivoPasajero = viaje;

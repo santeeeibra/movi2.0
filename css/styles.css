@@ -1691,3 +1691,64 @@ body {
   70% { box-shadow: 0 0 0 8px rgba(20, 107, 82, 0); }
   100% { box-shadow: 0 0 0 0 rgba(20, 107, 82, 0); }
 }
+
+/* ==================================================================
+   Ofertas / código de descuento
+   ================================================================== */
+.codigo-descuento-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.codigo-input {
+  flex: 1;
+  height: 44px;
+  padding: 0 14px;
+  border: 1px solid var(--linea);
+  border-radius: var(--radius-sm);
+  background: var(--crema);
+  color: var(--texto);
+  font-family: inherit;
+  font-size: 14px;
+}
+
+.codigo-input:focus {
+  outline: none;
+  border-color: var(--verde);
+}
+
+.codigo-btn {
+  height: 44px;
+  padding: 0 18px;
+  border: 1px solid var(--verde);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--verde);
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.codigo-btn:active {
+  background: var(--verde-tint);
+}
+
+.descuento-msg {
+  margin-top: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--verde-fuerte);
+}
+
+.descuento-msg.error {
+  color: #B3402A;
+}
+
+.descuento-detalle {
+  margin-top: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--verde-fuerte);
+}
