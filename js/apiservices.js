@@ -96,7 +96,11 @@ async function buscarInterseccionOSM(calle1, calle2, bbox) {
 
   console.warn(`[Movi] Ninguna interseccion encontrada en OSM para "${calle1}" y "${calle2}"`);
   if (json?._diagnostico) {
-    console.warn('[Movi] Diagnostico Overpass (por que fallo cada espejo):', json._diagnostico);
+    // Lo guardamos en una variable global simple para que se pueda copiar
+    // desde la consola con: copy(window.moviOverpassDiag) — mas facil que
+    // desplegar el array a mano en la consola.
+    window.moviOverpassDiag = json._diagnostico;
+    console.warn('[Movi] Diagnostico guardado en window.moviOverpassDiag. Para copiarlo, escribi en la consola: copy(window.moviOverpassDiag)');
   }
   return null;
 }
