@@ -27,6 +27,49 @@ function distanciaAproximada(lng, lat) {
 // ==================================================================
 const PATRON_INTERSECCION = /^(.+?)\s+(?:y|esquina(?:\s+con)?)\s+(.+)$/i;
 
+// ==================================================================
+//  Respaldo de interseccion via OpenStreetMap (Overpass API): busca un
+//  nodo que sea parte de AMBAS calles a la vez en el mapa real. Esto
+//  no es una estimacion ni un "mejor candidato" — si Overpass devuelve
+//  un nodo compartido, es porque esas dos calles se tocan de verdad
+//  en ese punto exacto. Si no hay nodo compartido, no se devuelve
+//  nada (cero margen de error, igual de estricto que el chequeo de
+//  Mapbox de arriba, pero con mejor cobertura en calles chicas de
+//  Viedma/Patagones que Mapbox no siempre reconoce como cruce).
+// ==================================================================
+const OVERPASS_URL = 'https://overpass-api.de/api/interpreter';
+
+function bboxOverpass(bbox) {
+  const [minLng, minLat, maxLng, maxLat] = bbox;
+  return `${minLat},${minLng},${maxLat},${maxLng}`;
+}
+
+async function buscarInterseccionOSM(calle1, calle2, bbox) {
+  const bb = bboxOverpass(bbox);
+  const escapar = (s) => s.replace(/"/g, '\\"');
+  const query = `[out:json][timeout:20];`
+    + `way["name"~"${escapar(calle1)}",i](${bb})->.a;`
+    + `way["name"~"${escapar(calle2)}",i](${bb})->.b;`
+    + `node(w.a)(w.b);`
+    + `out center 1;`;
+
+  try {
+    const res = await fetch(OVERPASS_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: `data=${encodeURIComponent(query)}`,
+    });
+    if (!res.ok) return null;
+    const json = await res.json();
+    const nodo = json.elements?.find((el) => el.type === 'node');
+    if (!nodo) return null;
+    return { lat: nodo.lat, lng: nodo.lon };
+  } catch (err) {
+    console.error('[Movi] Error consultando interseccion en OSM:', err);
+    return null;
+  }
+}
+
 function detectarInterseccion(texto) {
   const match = texto.match(PATRON_INTERSECCION);
   if (!match) return null;
@@ -82,7 +125,21 @@ export async function searchMapbox(query) {
     // resultados" y que el pasajero ajuste el pin a mano, que un
     // resultado que parece preciso pero no lo es.
     features = features.filter((f) => f.properties?.accuracy === 'intersection');
-    if (features.length === 0) return [];
+
+    if (features.length === 0) {
+      // Mapbox no confirmo el cruce: probamos con el nodo compartido
+      // real de OpenStreetMap antes de rendirnos.
+      let punto = await buscarInterseccionOSM(interseccion.calle1, interseccion.calle2, VIEDMA_BBOX);
+      if (!punto) punto = await buscarInterseccionOSM(interseccion.calle1, interseccion.calle2, REGION_BBOX);
+      if (!punto) return [];
+
+      return [{
+        nombre: `${interseccion.calle1} y ${interseccion.calle2}`,
+        direccion: `${interseccion.calle1} y ${interseccion.calle2}`,
+        lat: punto.lat,
+        lng: punto.lng,
+      }];
+    }
   }
 
   return features
