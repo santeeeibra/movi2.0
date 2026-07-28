@@ -83,19 +83,44 @@ async function consultarOverpassProxy(query) {
   }
 }
 
+// Un punto esta "en Viedma" si cae dentro del bbox chico de Viedma. Se usa
+// para elegir, entre varios cruces posibles con el mismo nombre de calle
+// (ej: Rivadavia y Mitre existen tanto en Viedma como en Carmen de
+// Patagones, del otro lado del rio), el que corresponde al lado correcto.
+function estaEnViedma(lat, lng) {
+  const [minLng, minLat, maxLng, maxLat] = VIEDMA_BBOX;
+  return lng >= minLng && lng <= maxLng && lat >= minLat && lat <= maxLat;
+}
+
 async function buscarInterseccionOSM(calle1, calle2, bbox) {
   const bb = bboxOverpass(bbox);
   const c1 = normalizarParaRegex(calle1);
   const c2 = normalizarParaRegex(calle2);
+  // Pedimos varios candidatos (no 1 solo) para poder elegir el correcto
+  // cuando el mismo par de nombres de calle se repite de los dos lados
+  // del rio (Viedma / Carmen de Patagones).
   const query = `[out:json][timeout:20];`
     + `way["name"~"${c1}",i](${bb})->.a;`
     + `way["name"~"${c2}",i](${bb})->.b;`
     + `node(w.a)(w.b);`
-    + `out center 1;`;
+    + `out center 10;`;
 
   const json = await consultarOverpassProxy(query);
-  const nodo = json?.elements?.find((el) => el.type === 'node');
-  if (nodo) return { lat: nodo.lat, lng: nodo.lon };
+  const nodos = (json?.elements || []).filter((el) => el.type === 'node');
+
+  if (nodos.length > 0) {
+    // Preferimos el/los que caen dentro de Viedma; si ninguno cae ahi,
+    // nos quedamos con el mas cercano al centro de Viedma (mejor
+    // aproximacion disponible antes de rendirnos).
+    const enViedma = nodos.filter((n) => estaEnViedma(n.lat, n.lon));
+    const candidatos = enViedma.length > 0 ? enViedma : nodos;
+    const mejor = candidatos.reduce((mejorHastaAhora, actual) => {
+      const dActual = distanciaAproximada(actual.lon, actual.lat);
+      const dMejor = distanciaAproximada(mejorHastaAhora.lon, mejorHastaAhora.lat);
+      return dActual < dMejor ? actual : mejorHastaAhora;
+    });
+    return { lat: mejor.lat, lng: mejor.lon };
+  }
 
   console.warn(`[Movi] Ninguna interseccion encontrada en OSM para "${calle1}" y "${calle2}"`);
   if (json?._diagnostico) {
@@ -166,9 +191,11 @@ export async function searchMapbox(query) {
 
     if (features.length === 0) {
       // Mapbox no confirmo el cruce: probamos con el nodo compartido
-      // real de OpenStreetMap antes de rendirnos.
-      let punto = await buscarInterseccionOSM(interseccion.calle1, interseccion.calle2, VIEDMA_BBOX);
-      if (!punto) punto = await buscarInterseccionOSM(interseccion.calle1, interseccion.calle2, REGION_BBOX);
+      // real de OpenStreetMap antes de rendirnos. Una sola consulta con
+      // el area grande (que ya incluye Viedma) alcanza — pedir primero
+      // el area chica y despues la grande duplicaba el tiempo de espera
+      // y las chances de que Overpass falle por sobrecarga.
+      const punto = await buscarInterseccionOSM(interseccion.calle1, interseccion.calle2, REGION_BBOX);
       if (!punto) return [];
 
       return [{
