@@ -1648,3 +1648,46 @@ body {
   border-color: var(--verde-fuerte, #1F8A4C);
   transform: scale(1.12);
 }
+
+/* ================================================================ */
+/*  Isla flotante de ETA (estilo Dynamic Island) — muestra cuántos    */
+/*  minutos tarda el conductor en llegar al pasajero, en tiempo real. */
+/* ================================================================ */
+.eta-island {
+  position: absolute;
+  top: max(14px, env(safe-area-inset-top));
+  left: 50%;
+  transform: translateX(-50%) translateY(-60px);
+  z-index: var(--z-sheet);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 18px;
+  border-radius: 999px;
+  background: rgba(20, 23, 26, 0.92);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 700;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+  opacity: 0;
+  pointer-events: none;
+  transition: transform 0.4s cubic-bezier(.34, 1.56, .64, 1), opacity 0.3s ease;
+}
+.eta-island.show {
+  transform: translateX(-50%) translateY(0);
+  opacity: 1;
+}
+.eta-island-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--verde);
+  animation: eta-pulse 1.6s infinite;
+}
+@keyframes eta-pulse {
+  0% { box-shadow: 0 0 0 0 rgba(20, 107, 82, 0.6); }
+  70% { box-shadow: 0 0 0 8px rgba(20, 107, 82, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(20, 107, 82, 0); }
+}

@@ -789,6 +789,7 @@ function iniciarTrackingConductor(telefono) {
     },
     (err) => {
       console.error('[Movi] Error obteniendo ubicacion del conductor:', err);
+      mostrarToast('No pudimos acceder a tu ubicación — revisá los permisos del navegador 📍', '⚠️');
     },
     { enableHighAccuracy: true, maximumAge: 0, timeout: 15000 },
   );
@@ -1117,6 +1118,12 @@ async function dibujarRutaConductorHaciaOrigen(viaje) {
   const destino = { lat: viaje.origen_lat, lng: viaje.origen_lng };
   const ruta = await getRuta([posActual, destino]);
   if (!ruta || !map.getSource('ruta')) return;
+
+  // FIX: antes el ETA quedaba fijo en el "3" de aceptarViaje para
+  // siempre. Ahora que ya calculamos la ruta real hacia el origen,
+  // guardamos la duracion real en minutos.
+  const etaReal = Math.max(1, Math.round(ruta.minutos));
+  await supabase.from('viajes').update({ eta_minutos: etaReal }).eq('id', viaje.id);
 
   aplicarEstiloRuta('hacia_pasajero');
   map.getSource('ruta').setData({ type: 'Feature', properties: {}, geometry: ruta.geometry });
@@ -2502,6 +2509,27 @@ document.getElementById('btn-pedir-viaje').addEventListener('click', async () =>
     });
 });
 
+// ==================================================================
+//  Isla flotante de ETA (arriba del mapa, estilo Dynamic Island):
+//  muestra cuantos minutos reales tarda el conductor en llegar. Se
+//  actualiza cada vez que llega un cambio del viaje (incluido el ETA
+//  recalculado en dibujarRutaConductorHaciaOrigen).
+// ==================================================================
+const etaIsland = document.getElementById('eta-island');
+const etaIslandTexto = document.getElementById('eta-island-texto');
+
+function actualizarIslaEta(viaje) {
+  const visible = ['conductor_asignado', 'en_camino', 'llegó'].includes(viaje.estado);
+  if (!visible) {
+    etaIsland.classList.remove('show');
+    return;
+  }
+  etaIslandTexto.textContent = viaje.estado === 'llegó'
+    ? 'Tu conductor llegó 📍'
+    : (viaje.eta_minutos != null ? `Tu conductor llega en ${viaje.eta_minutos} min` : 'Tu conductor está en camino');
+  etaIsland.classList.add('show');
+}
+
 // Toda la logica de reaccionar a un cambio de estado del viaje del
 // pasajero, en una funcion aparte para poder llamarla tanto desde el
 // evento de Realtime como desde el chequeo manual de respaldo (arriba, y
@@ -2510,6 +2538,7 @@ function procesarActualizacionViajePasajero(actualizado) {
   const estadoAnterior = viajeActivoPasajero?.estado;
   viajeActivoPasajero = actualizado;
   sincronizarCapaAutoConductor();
+  actualizarIslaEta(actualizado);
 
   if (actualizado.estado === 'conductor_asignado' && actualizado.conductor_telefono && estadoAnterior !== 'conductor_asignado') {
     buscandoOverlay.classList.remove('show', 'visible');
