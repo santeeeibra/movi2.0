@@ -37,37 +37,66 @@ const PATRON_INTERSECCION = /^(.+?)\s+(?:y|esquina(?:\s+con)?)\s+(.+)$/i;
 //  Mapbox de arriba, pero con mejor cobertura en calles chicas de
 //  Viedma/Patagones que Mapbox no siempre reconoce como cruce).
 // ==================================================================
-const OVERPASS_URL = 'https://overpass-api.de/api/interpreter';
+// Varios espejos de Overpass: el publico principal a veces no responde
+// (esta saturado o bloquea ciertas redes) y se queda "colgado" sin
+// devolver error. Se prueban en orden, cada uno con tiempo limite propio,
+// en vez de confiar en que el primero siempre conteste.
+const OVERPASS_URLS = [
+  'https://overpass-api.de/api/interpreter',
+  'https://overpass.kumi.systems/api/interpreter',
+  'https://lz4.overpass-api.de/api/interpreter',
+];
+const OVERPASS_TIMEOUT_MS = 6000;
 
 function bboxOverpass(bbox) {
   const [minLng, minLat, maxLng, maxLat] = bbox;
   return `${minLat},${minLng},${maxLat},${maxLng}`;
 }
 
-async function buscarInterseccionOSM(calle1, calle2, bbox) {
-  const bb = bboxOverpass(bbox);
-  const escapar = (s) => s.replace(/"/g, '\\"');
-  const query = `[out:json][timeout:20];`
-    + `way["name"~"${escapar(calle1)}",i](${bb})->.a;`
-    + `way["name"~"${escapar(calle2)}",i](${bb})->.b;`
-    + `node(w.a)(w.b);`
-    + `out center 1;`;
+// Quita tildes para que "Peru" matchee "Perú" y viceversa (igual que se
+// hace del lado de Supabase con normalizarTexto en databaseservice.js).
+function normalizarParaRegex(texto) {
+  return texto.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/"/g, '\\"');
+}
 
+async function consultarOverpass(url, query) {
+  const controlador = new AbortController();
+  const timeoutId = setTimeout(() => controlador.abort(), OVERPASS_TIMEOUT_MS);
   try {
-    const res = await fetch(OVERPASS_URL, {
+    const res = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: `data=${encodeURIComponent(query)}`,
+      signal: controlador.signal,
     });
     if (!res.ok) return null;
-    const json = await res.json();
-    const nodo = json.elements?.find((el) => el.type === 'node');
-    if (!nodo) return null;
-    return { lat: nodo.lat, lng: nodo.lon };
+    return await res.json();
   } catch (err) {
-    console.error('[Movi] Error consultando interseccion en OSM:', err);
+    console.warn(`[Movi] Overpass (${url}) no respondio:`, err.message || err);
     return null;
+  } finally {
+    clearTimeout(timeoutId);
   }
+}
+
+async function buscarInterseccionOSM(calle1, calle2, bbox) {
+  const bb = bboxOverpass(bbox);
+  const c1 = normalizarParaRegex(calle1);
+  const c2 = normalizarParaRegex(calle2);
+  const query = `[out:json][timeout:20];`
+    + `way["name"~"${c1}",i](${bb})->.a;`
+    + `way["name"~"${c2}",i](${bb})->.b;`
+    + `node(w.a)(w.b);`
+    + `out center 1;`;
+
+  for (const url of OVERPASS_URLS) {
+    const json = await consultarOverpass(url, query);
+    const nodo = json?.elements?.find((el) => el.type === 'node');
+    if (nodo) return { lat: nodo.lat, lng: nodo.lon };
+  }
+
+  console.warn(`[Movi] Ninguna interseccion encontrada en OSM para "${calle1}" y "${calle2}"`);
+  return null;
 }
 
 function detectarInterseccion(texto) {

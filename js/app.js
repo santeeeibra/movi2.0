@@ -1637,15 +1637,45 @@ function proyectarEnRuta(lat, lng, coordenadas) {
   if (!coordenadas || coordenadas.length < 2) return null;
 
   let mejor = null;
+  let mejorIndice = -1;
   for (let i = 0; i < coordenadas.length - 1; i++) {
     const candidato = proyectarEnSegmento(lat, lng, coordenadas[i], coordenadas[i + 1]);
     if (!mejor || candidato.distanciaMetros < mejor.distanciaMetros) {
       mejor = candidato;
+      mejorIndice = i;
     }
   }
+  if (mejor) mejor.indiceSegmento = mejorIndice;
 
   if (!mejor || mejor.distanciaMetros > 60) return null;
   return mejor;
+}
+
+// ==================================================================
+//  Borra visualmente el tramo ya recorrido de la linea de ruta (capas
+//  'ruta-glow'/'ruta-linea'), dejando solo lo que falta por delante del
+//  auto. Solo toca el source "ruta" — los pines de origen/destino/
+//  paradas viven en sources aparte, asi que nunca se ven afectados.
+//  Sirve tanto para el seguimiento con GPS real (aplicarNuevaPosicionConductor)
+//  como para las simulaciones (simAutoIniciar, devSimularRecorrido), que
+//  le pasan el indice de segmento por sus propios medios.
+// ==================================================================
+function dibujarRutaRestante(coordenadas, indiceSegmento, lat, lng) {
+  if (!map.getSource('ruta') || !coordenadas) return;
+
+  const restante = [[lng, lat], ...coordenadas.slice(indiceSegmento + 1)];
+
+  if (restante.length < 2) {
+    // Ya no queda nada por delante (llegó): no dejar una linea de 1 punto.
+    map.getSource('ruta').setData({ type: 'FeatureCollection', features: [] });
+    return;
+  }
+
+  map.getSource('ruta').setData({
+    type: 'Feature',
+    properties: {},
+    geometry: { type: 'LineString', coordinates: restante },
+  });
 }
 
 // Angulo mas corto entre dos rumbos (0-360), para que la rotacion del
@@ -1769,6 +1799,41 @@ function aplicarNuevaPosicionConductor(fix) {
   }
 
   animarAutoHacia(latObjetivo, lngObjetivo, headingObjetivo);
+
+  if (proyeccion) {
+    // Sigue sobre la ruta calculada: borramos el tramo ya recorrido.
+    dibujarRutaRestante(rutaGeometriaActual, proyeccion.indiceSegmento, latObjetivo, lngObjetivo);
+  } else if (rutaGeometriaActual) {
+    // Habia una ruta pero el conductor se desvio (tomo otro camino):
+    // pedimos una ruta nueva desde donde esta ahora hasta el mismo
+    // destino/paradas que faltan, en vez de dejar la linea vieja
+    // dibujada sobre un camino que ya no esta siguiendo.
+    recalcularRutaSiDesviado(fix);
+  }
+}
+
+// Waypoints [{lat,lng}, ...] de la ruta que se esta siguiendo ahora mismo
+// (origen real + paradas/destino que faltan), para poder recalcular sin
+// perder de vista a donde tiene que llegar el conductor.
+let puntosRutaSeguidaActual = null;
+let recalculandoRutaSeguida = false;
+
+async function recalcularRutaSiDesviado(fix) {
+  if (!puntosRutaSeguidaActual || puntosRutaSeguidaActual.length < 2 || recalculandoRutaSeguida) return;
+  recalculandoRutaSeguida = true;
+  try {
+    const puntosRestantes = puntosRutaSeguidaActual.slice(1);
+    const ruta = await getRuta([{ lat: fix.lat, lng: fix.lng }, ...puntosRestantes]);
+    if (ruta && map.getSource('ruta')) {
+      map.getSource('ruta').setData({ type: 'Feature', properties: {}, geometry: ruta.geometry });
+      rutaGeometriaActual = ruta.geometry?.coordinates || null;
+      puntosRutaSeguidaActual = [{ lat: fix.lat, lng: fix.lng }, ...puntosRestantes];
+    }
+  } catch (err) {
+    console.error('[Movi] Error recalculando ruta por desvio:', err);
+  } finally {
+    recalculandoRutaSeguida = false;
+  }
 }
 
 function iniciarSeguimientoPosicionConductor(telefono) {
@@ -1818,6 +1883,7 @@ function detenerSeguimientoPosicionConductor() {
   }
   posicionAutoMostrada = null;
   rutaGeometriaActual = null;
+  puntosRutaSeguidaActual = null;
   ultimaLlegadaFixMs = null;
 
   const source = map.getSource('auto-conductor');
@@ -3316,7 +3382,7 @@ function devPuntoEnDistancia(coords, acumuladas, distancia) {
   const lat = a[1] + (b[1] - a[1]) * t;
   const heading = calcularRumbo({ lat: a[1], lng: a[0] }, { lat: b[1], lng: b[0] });
 
-  return { lat, lng, heading };
+  return { lat, lng, heading, indiceSegmento: i - 1 };
 }
 
 // ==================================================================
@@ -3370,6 +3436,7 @@ function simAutoSaltarAlFinal() {
 
   const final = devPuntoEnDistancia(simAutoCoords, simAutoAcumuladas, simAutoDistanciaTotal);
   pintarAutoEnMapa(final.lat, final.lng, final.heading);
+  dibujarRutaRestante(simAutoCoords, simAutoCoords.length, final.lat, final.lng);
   posicionAutoMostrada = final;
   simAutoEscribirSupabase(final);
 
@@ -3400,6 +3467,7 @@ async function simAutoIniciar(puntos, telefono, callbackAlLlegar) {
     map.getSource('ruta').setData({ type: 'Feature', properties: {}, geometry: ruta.geometry });
   }
   rutaGeometriaActual = ruta.geometry.coordinates;
+  puntosRutaSeguidaActual = puntos;
   window._iniciarAnimacionGlow?.();
 
   simAutoCoords = ruta.geometry.coordinates;
@@ -3424,6 +3492,7 @@ async function simAutoIniciar(puntos, telefono, callbackAlLlegar) {
 
     const punto = devPuntoEnDistancia(simAutoCoords, simAutoAcumuladas, distanciaRecorrida);
     pintarAutoEnMapa(punto.lat, punto.lng, punto.heading);
+    dibujarRutaRestante(simAutoCoords, punto.indiceSegmento, punto.lat, punto.lng);
     posicionAutoMostrada = punto;
 
     if (ahora - ultimaEscritura > INTERVALO_ESCRITURA_SUPABASE_MS) {
@@ -3550,6 +3619,7 @@ async function devSimularRecorrido(puntos, textoOk) {
     map.getSource('ruta').setData({ type: 'Feature', properties: {}, geometry: ruta.geometry });
   }
   rutaGeometriaActual = ruta.geometry.coordinates;
+  puntosRutaSeguidaActual = puntos;
   window._iniciarAnimacionGlow?.();
 
   const coords = ruta.geometry.coordinates; // [[lng,lat], ...]
@@ -3583,6 +3653,7 @@ async function devSimularRecorrido(puntos, textoOk) {
     if (distanciaRecorrida >= distanciaTotal) {
       const final = devPuntoEnDistancia(coords, acumuladas, distanciaTotal);
       pintarAutoEnMapa(final.lat, final.lng, final.heading);
+      dibujarRutaRestante(coords, coords.length, final.lat, final.lng);
       posicionAutoMostrada = final;
       escribirEnSupabase(final);
       devDetenerSimulacion(textoOk);
@@ -3595,6 +3666,7 @@ async function devSimularRecorrido(puntos, textoOk) {
     // no hace falta ninguna suavizacion extra encima — esa suavizacion es
     // para el caso de GPS real, que llega mucho mas espaciado.
     pintarAutoEnMapa(punto.lat, punto.lng, punto.heading);
+    dibujarRutaRestante(coords, punto.indiceSegmento, punto.lat, punto.lng);
     posicionAutoMostrada = punto;
 
     if (ahora - ultimaEscritura > INTERVALO_ESCRITURA_SUPABASE_MS) {
