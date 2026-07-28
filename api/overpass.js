@@ -31,7 +31,15 @@ async function consultarOverpass(url, query) {
   try {
     const res = await fetch(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Accept': 'application/json',
+        // Los servidores de Overpass rechazan pedidos sin un User-Agent
+        // descriptivo (406 Not Acceptable / 429 rate-limit incluso en el
+        // primer pedido). Node/Vercel no manda uno por defecto, hay que
+        // ponerlo a mano.
+        'User-Agent': 'MoviApp-Viedma/1.0 (contacto: soporte@movi-app.com.ar)',
+      },
       body: `data=${encodeURIComponent(query)}`,
       signal: controlador.signal,
     });
