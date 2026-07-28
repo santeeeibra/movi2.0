@@ -62,10 +62,10 @@ function normalizarParaRegex(texto) {
 
 async function consultarOverpassProxy(query) {
   const controlador = new AbortController();
-  // El proxy ahora prueba los 3 espejos en paralelo (ver api/overpass.js),
-  // asi que responde en ~6-7s como mucho. Le damos 10s de margen del lado
-  // del navegador para no cortar la espera antes de tiempo.
-  const timeoutId = setTimeout(() => controlador.abort(), 10000);
+  // La funcion puede tardar hasta ~8-9s (espejos en paralelo, ver
+  // api/overpass.js) mas el arranque del servidor. Le damos 15s de
+  // margen del lado del navegador para no cortarla antes de tiempo.
+  const timeoutId = setTimeout(() => controlador.abort(), 15000);
   try {
     const res = await fetch('/api/overpass', {
       method: 'POST',

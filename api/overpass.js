@@ -15,12 +15,17 @@
 //  vive en el mismo origen que la app, asi que no hay CORS de por
 //  medio), y esta función le pide a Overpass por atrás.
 // ==================================================================
+// Le decimos explicitamente a Vercel que esta funcion puede tardar hasta
+// 20s (por defecto algunos planes la cortan a los 10s, que es muy poco
+// si el pedido a Overpass tarda en responder por trafico/carga).
+export const config = { maxDuration: 20 };
+
 const OVERPASS_URLS = [
   'https://overpass-api.de/api/interpreter',
   'https://overpass.kumi.systems/api/interpreter',
   'https://lz4.overpass-api.de/api/interpreter',
 ];
-const OVERPASS_TIMEOUT_MS = 6000;
+const OVERPASS_TIMEOUT_MS = 8000;
 
 // Devuelve { json } si salio bien, o { fallo: 'motivo corto' } si no. Asi
 // el caller puede armar un reporte de diagnostico con la causa real de
