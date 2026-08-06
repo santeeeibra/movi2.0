@@ -443,40 +443,54 @@ function ocultarLoginYApp() {
   inicioMapa = true; // prevent map init if we're going to show something else
 }
 
-// Inicial: decidir qué mostrar según localStorage
+// Inicial: decidir qué mostrar según localStorage.
+//
+// Se ejecuta como funcion y se invoca REcien al final del modulo (ver la
+// ultima linea del archivo), despues de que TODAS las const/let de nivel de
+// este modulo ya se inicializaron. Hacerlo asi elimina de raiz el error de
+// "temporal dead zone" (Cannot access 'X' before initialization) que
+// rompia la app empaquetada al iniciar la sesion del conductor: antes esta
+// logica corria de forma sincronica a mitad de la evaluacion del modulo,
+// cuando las variables de sesion del conductor (y otras) todavia estaban en
+// la zona muerta temporal porque se declaraban mas abajo en el archivo.
+// `rol` se lee a nivel de modulo porque mas abajo (al configurar el mapa)
+// se decide si el pin de origen es arrastrable segun el rol (linea 1938).
 const rol = localStorage.getItem('rol');
-const conductorTelefonoLS = localStorage.getItem('conductor_telefono');
-const usuarioExistente = cargarUsuario();
 
-if (rol === 'conductor') {
-  if (conductorTelefonoLS) {
-    // Conductor ya registrado → pantalla de espera
-    mostrarOverlay(driverWaitingOverlay);
-    bloquearApp(true);
-    iniciarSupervisionViajeConductor(conductorTelefonoLS);
-  } else {
-    // Conductor sin datos → formulario
-    mostrarOverlay(conductorFormOverlay);
-    bloquearApp(true);
-  }
-} else if (rol === 'pasajero') {
-  const pasajeroTelefonoLS = localStorage.getItem('pasajero_telefono');
-  if (pasajeroTelefonoLS) {
-    // Pasajero ya logueado → app normal
-    mostrarOverlay(null);
-    bloquearApp(false);
-    if (usuarioExistente) {
-      aplicarUsuarioEnPerfil(usuarioExistente);
+function iniciarSesionSegunRol() {
+  const conductorTelefonoLS = localStorage.getItem('conductor_telefono');
+  const usuarioExistente = cargarUsuario();
+
+  if (rol === 'conductor') {
+    if (conductorTelefonoLS) {
+      // Conductor ya registrado → pantalla de espera
+      mostrarOverlay(driverWaitingOverlay);
+      bloquearApp(true);
+      iniciarSupervisionViajeConductor(conductorTelefonoLS);
+    } else {
+      // Conductor sin datos → formulario
+      mostrarOverlay(conductorFormOverlay);
+      bloquearApp(true);
+    }
+  } else if (rol === 'pasajero') {
+    const pasajeroTelefonoLS = localStorage.getItem('pasajero_telefono');
+    if (pasajeroTelefonoLS) {
+      // Pasajero ya logueado → app normal
+      mostrarOverlay(null);
+      bloquearApp(false);
+      if (usuarioExistente) {
+        aplicarUsuarioEnPerfil(usuarioExistente);
+      }
+    } else {
+      // Pasajero sin datos → login de pasajero
+      mostrarOverlay(loginOverlay);
+      bloquearApp(true);
     }
   } else {
-    // Pasajero sin datos → login de pasajero
-    mostrarOverlay(loginOverlay);
+    // Sin rol → elegir
+    mostrarOverlay(roleSelectOverlay);
     bloquearApp(true);
   }
-} else {
-  // Sin rol → elegir
-  mostrarOverlay(roleSelectOverlay);
-  bloquearApp(true);
 }
 
 // "Soy Pasajero"
@@ -4157,3 +4171,14 @@ devBtnCancelar.addEventListener('click', async () => {
   devActualizarJson(data);
   devMostrarFeedback(devFeedbackCancelar, 'Listo ✅ viaje cancelado');
 });
+
+// ==================================================================
+//  Arranque de la app: elegir rol y preparar la pantalla segun lo
+//  guardado en localStorage (ver funcion iniciarSesionSegunRol() mas
+//  arriba). Se invoca ACA, al final del modulo, cuando todas las
+//  const/let de nivel de archivo ya se inicializaron — esto evita que
+//  una lectura sincrona de estado corra antes de su declaracion y tire
+//  "temporal dead zone" (Cannot access 'X' before initialization) en la
+//  version empaquetada/minificada al abrir la pantalla del conductor.
+// ==================================================================
+iniciarSesionSegunRol();
