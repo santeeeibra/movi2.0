@@ -1924,6 +1924,10 @@ const marcadorOrigen = new mapboxgl.Marker({ element: origenEl, draggable: true 
   .setLngLat([origenActual.lng, origenActual.lat])
   .addTo(map);
 
+if (rol === 'conductor') {
+  marcadorOrigen.setDraggable(false);
+}
+
 // ==================================================================
 //  Aviso de seguridad: si el usuario arrastra el pin de origen, hay
 //  que confirmarlo antes de poder pedir el viaje (no se puede ignorar
@@ -2531,7 +2535,18 @@ btnAgregarParada.addEventListener('click', () => {
   abrirBusquedaParaParada();
 });
 
-btnModificarDestino.addEventListener('click', () => {
+btnModificarDestino.addEventListener('click', async () => {
+  if (localStorage.getItem('rol') === 'conductor') return;
+
+  if (viajeActivoPasajero !== null && viajeActivoPasajero.estado !== 'pendiente') {
+    const confirmar = await mostrarConfirm(
+      '¿Modificar el destino? El precio del viaje se va a recalcular.',
+      'Modificar',
+      'Cancelar'
+    );
+    if (!confirmar) return;
+  }
+
   modoBusqueda = null;
   abrirBusquedaParaParada();
 });
@@ -2726,6 +2741,13 @@ function procesarActualizacionViajePasajero(actualizado) {
   sincronizarCapaAutoConductor();
   actualizarIslaEta(actualizado);
 
+  const estadoViaje = actualizado.estado;
+  if (['conductor_asignado', 'en_camino', 'en_viaje'].includes(estadoViaje)) {
+    marcadorOrigen.setDraggable(false);
+  } else if (estadoViaje === 'finalizado' || estadoViaje === 'cancelado' || viajeActivoPasajero === null) {
+    marcadorOrigen.setDraggable(true);
+  }
+
   if (actualizado.estado === 'conductor_asignado' && actualizado.conductor_telefono && estadoAnterior !== 'conductor_asignado') {
     buscandoOverlay.classList.remove('show', 'visible');
     sheet.style.display = 'none';
@@ -2822,6 +2844,7 @@ document.getElementById('btn-cancelar-busqueda').addEventListener('click', async
   }
   viajeActivoPasajero = null;
   sincronizarCapaAutoConductor();
+  marcadorOrigen.setDraggable(true);
 });
 
 document.getElementById('btn-cancelar-viaje').addEventListener('click', async () => {
