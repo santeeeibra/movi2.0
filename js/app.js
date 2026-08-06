@@ -792,6 +792,13 @@ function iniciarTrackingConductor(telefono) {
   if (watchIdConductor !== null) return; // ya esta corriendo
   if (!('geolocation' in navigator)) return;
 
+  // En la vista del conductor, su posicion la representa el auto 3D en
+  // vez del pin 2D "mi ubicacion" por defecto: lo ocultamos mientras
+  // corre el tracking.
+  if (rol === 'conductor' && marcadorOrigen) {
+    marcadorOrigen.getElement().style.display = 'none';
+  }
+
   posicionAnteriorConductor = null;
   ultimoEnvioGpsConductor = 0;
 
@@ -810,6 +817,10 @@ function iniciarTrackingConductor(telefono) {
         ultimoEnvioGpsConductor = ahora;
         enviarPosicionConductor(telefono, actual.lat, actual.lng, heading);
       }
+
+      // Vista del conductor: pinta su propio auto en 3D en el mapa con su
+      // color, siguiendo cada fix de GPS (reemplaza al pin por defecto).
+      agregarModeloAuto3D(map, { lat: actual.lat, lng: actual.lng, heading }, colorAutoPropioConductor);
 
       posicionAnteriorConductor = actual;
     },
@@ -1294,11 +1305,12 @@ function iniciarSupervisionViajeConductor(telefono) {
   // pagina, no queremos que la UI vuelva a "no disponible" por defecto).
   supabase
     .from('conductores')
-    .select('disponible')
+    .select('disponible, color_auto')
     .eq('telefono', telefono)
     .maybeSingle()
     .then(({ data }) => {
       conductorDisponible = Boolean(data?.disponible);
+      colorAutoPropioConductor = COLORES_AUTO[data?.color_auto] || COLOR_AUTO_DEFAULT;
       actualizarToggleUI();
       if (conductorDisponible && !conductorViajeActivo) {
         iniciarListaPendientes();
@@ -1467,19 +1479,20 @@ map.on('load', () => {
     },
   });
 
-  // Escala exagerada a proposito (no realista): a mayor zoom-out, mas
-  // grande en proporcion, para que el auto se siga viendo bien aunque
-  // el mapa este alejado — el tamaño real se pierde de vista mucho
-  // antes que un icono 2D tradicional. model-scale espera un vector
-  // [x,y,z], asi que interpolamos entre vectores literales, no un
-  // numero suelto.
-  const AUTO_MODEL_SCALE = [
-    'interpolate', ['linear'], ['zoom'],
-    12, ['literal', [42, 42, 42]],
-    14, ['literal', [24, 24, 24]],
-    16, ['literal', [13, 13, 13]],
-    19, ['literal', [5, 5, 5]],
-  ];
+  // Escala del modelo a TAMAÑO REAL: las capas `model` de Mapbox ya
+  // anclan el modelo al plano geografico (el auto conserva su footprint
+  // real en el mundo) y `model-scale` es un multiplicador constante en
+  // las unidades del .glb — no en pixeles. Un valor CONSTANTE deja el
+  // auto a un tamaño real fijo a CUALQUIER nivel de zoom.
+  //
+  // ANTES esto era una curva de zoom interpolada (42 → 5) que "peleaba"
+  // contra el anclaje geografico de Mapbox: a mayor zoom-out hacia el
+  // auto gigante y a mayor zoom-in diminuto (el bug de desproporción).
+  // Al dejarlo constante, Mapbox conserva el auto a su tamaño real en
+  // todos los zooms. Este valor es el unico que calibrar en el celular
+  // si se quiere el auto un poco mas grande/chico (el .glb de Kenney
+  // mide ~5 unidades ≈ un auto de ~4.5 m reales).
+  const AUTO_MODEL_SCALE = [5.4, 5.4, 5.4];
 
   // FIX auto "de cola": el .glb (sedan-sports de Kenney) tiene el frente
   // modelado hacia el eje opuesto al que espera calcularRumbo (0=Norte,
@@ -1596,6 +1609,10 @@ map.on('load', () => {
 let canalPosicionConductor = null;
 let telefonoConductorSeguido = null;
 let colorConductorSeguido = COLOR_AUTO_DEFAULT;
+// Color del auto propio del conductor (vista del conductor). Se captura
+// al iniciar su sesion desde conductores.color_auto (ver
+// iniciarSupervisionViajeConductor) y lo usa iniciarTrackingConductor.
+let colorAutoPropioConductor = COLOR_AUTO_DEFAULT;
 
 const ESTADOS_VIAJE_CON_AUTO_VISIBLE = ['conductor_asignado', 'en_camino', 'en_viaje'];
 
@@ -1722,18 +1739,28 @@ function interpolarAngulo(desde, hasta, t) {
 let animacionAutoFrameId = null;
 let posicionAutoMostrada = null; // ultima posicion realmente pintada en el mapa
 
-function pintarAutoEnMapa(lat, lng, heading) {
-  const source = map.getSource('auto-conductor');
-  if (!source) return;
+// Pinta/actualiza el auto 3D en el mapa en (lat, lng, heading).
+// Reutilizable: la usa el pasajero para el auto del conductor asignado
+// (aplicarNuevaPosicionConductor y simulaciones) y el CONDUCTOR para su
+// propio auto (ver iniciarTrackingConductor). colorHex es opcional: por
+// defecto usa colorConductorSeguido (caso del pasajero).
+function agregarModeloAuto3D(mapa, coords, colorHex) {
+  const source = mapa.getSource('auto-conductor');
+  if (!source || !coords || coords.lat == null || coords.lng == null) return;
+  const heading = coords.heading || 0;
   source.setData({
     type: 'FeatureCollection',
     features: [{
       type: 'Feature',
-      geometry: { type: 'Point', coordinates: [lng, lat] },
-      properties: { heading, colorHex: colorConductorSeguido },
+      geometry: { type: 'Point', coordinates: [coords.lng, coords.lat] },
+      properties: { heading, colorHex: colorHex || colorConductorSeguido },
     }],
   });
-  posicionConductor = { lat, lng, heading };
+  posicionConductor = { lat: coords.lat, lng: coords.lng, heading };
+}
+
+function pintarAutoEnMapa(lat, lng, heading) {
+  agregarModeloAuto3D(map, { lat, lng, heading }, colorConductorSeguido);
 }
 
 // Anima el icono del auto desde su posicion actual en pantalla hasta la
