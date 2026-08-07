@@ -761,6 +761,23 @@ let watchIdConductor = null;
 let posicionAnteriorConductor = null;
 let ultimoEnvioGpsConductor = 0;
 
+// Camara de navegacion para la vista del conductor. El auto queda en el
+// tercio inferior del mapa, inclinado y orientado hacia su rumbo, para que
+// se vean con anticipacion las proximas dos o tres cuadras de la ruta.
+function enfocarCamaraConductor(posicion, heading) {
+  if (!posicion || posicion.lat == null || posicion.lng == null) return;
+
+  map.easeTo({
+    center: [posicion.lng, posicion.lat],
+    zoom: 15.2,
+    pitch: 55,
+    bearing: Number.isFinite(heading) ? heading : map.getBearing(),
+    offset: [0, 125],
+    duration: 650,
+    essential: true,
+  });
+}
+
 // Formula de rumbo (bearing) entre dos coordenadas, en grados 0-360.
 // Respaldo para cuando el navegador no manda coords.heading (muy comun
 // con poca velocidad, GPS de baja precision, o en desktop).
@@ -821,6 +838,7 @@ function iniciarTrackingConductor(telefono) {
       // Vista del conductor: pinta su propio auto en 3D en el mapa con su
       // color, siguiendo cada fix de GPS (reemplaza al pin por defecto).
       agregarModeloAuto3D(map, { lat: actual.lat, lng: actual.lng, heading }, colorAutoPropioConductor);
+      enfocarCamaraConductor(actual, heading);
 
       posicionAnteriorConductor = actual;
     },
@@ -1167,10 +1185,7 @@ async function dibujarRutaConductorHaciaOrigen(viaje) {
   rutaGeometriaActual = ruta.geometry?.coordinates || null;
   window._iniciarAnimacionGlow?.();
 
-  const bounds = new mapboxgl.LngLatBounds()
-    .extend([posActual.lng, posActual.lat])
-    .extend([destino.lng, destino.lat]);
-  map.fitBounds(bounds, { padding: 80 });
+  enfocarCamaraConductor(posActual, posicionConductor?.heading);
 }
 
 async function dibujarRutaConductorViajeCompleto(viaje) {
@@ -1192,9 +1207,8 @@ async function dibujarRutaConductorViajeCompleto(viaje) {
   rutaGeometriaActual = ruta.geometry?.coordinates || null;
   window._iniciarAnimacionGlow?.();
 
-  const bounds = new mapboxgl.LngLatBounds();
-  puntos.forEach((p) => bounds.extend([p.lng, p.lat]));
-  map.fitBounds(bounds, { padding: 80 });
+  const posicionActual = posicionConductor || posicionAnteriorConductor || origen;
+  enfocarCamaraConductor(posicionActual, posicionActual.heading);
 }
 
 btnConductorLlegue.addEventListener('click', async () => {

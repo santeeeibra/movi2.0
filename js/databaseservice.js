@@ -37,7 +37,28 @@ export function distanciaMetros(lat1, lng1, lat2, lng2) {
 
 // zona (opcional): { lat, lng, radioMetros }. Si no se pasa, trae todo
 // (evitar en pantallas normales — es el caso que gasta banda ancha de mas).
+// Utiliza PostGIS vía RPC si 'zona' está presente, con un fallback seguro de BBox.
 export async function getLugares(zona) {
+  if (zona) {
+    try {
+      // Intentamos optimización geográfica nativa usando PostGIS en Supabase
+      const { data, error } = await supabase.rpc('get_places_in_radius', {
+        px_lat: parseFloat(zona.lat),
+        px_lng: parseFloat(zona.lng),
+        px_radio_metros: parseFloat(zona.radioMetros)
+      });
+      
+      if (!error && data) {
+        return data;
+      }
+      
+      console.warn('[Movi] Fallback a filtrado BBox cliente por error/falta de PostGIS RPC:', error);
+    } catch (err) {
+      console.warn('[Movi] Fallback a filtrado BBox cliente por excepción en RPC:', err);
+    }
+  }
+
+  // Fallback seguro usando BBox (bounding box) si no hay PostGIS o falla el RPC
   let query = supabase.from('places').select('*');
 
   if (zona) {

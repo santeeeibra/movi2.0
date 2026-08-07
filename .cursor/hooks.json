@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "hooks": {
+    "stop": [
+      {
+        "type": "prompt",
+        "timeout": 30,
+        "loop_limit": 1,
+        "prompt": "Antes de finalizar una conversacion de este proyecto, guarda automaticamente un resumen en la memoria MCP de Movi mediante la herramienta de memoria disponible. El resumen debe indicar: 1. Que problema se resolvio. 2. Que archivos se modificaron. 3. Que decisiones se tomaron. 4. Que quedo pendiente. Si no hubo cambios o no se resolvio nada, indicalo explicitamente. Si la memoria MCP no esta disponible o falla, no bloquees el cierre de la conversacion: informa el problema de forma breve."
+      }
+    ]
+  }
+}

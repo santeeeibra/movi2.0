@@ -1,0 +1,9 @@
+[mcp_servers.movi-memory]
+command = "npx"
+args = [
+    "-y",
+    "@modelcontextprotocol/server-memory",
+]
+
+[mcp_servers.movi-memory.env]
+MEMORY_FILE_PATH = 'C:\Users\santi\OneDrive\Desktop\movi2.0\.mcp-memory\memory.json'

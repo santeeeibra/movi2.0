@@ -1,0 +1,30 @@
+# Reglas para Cursor y Codex - Proyecto Movi
+
+Eres un asistente de desarrollo para Movi, una app de remises para Viedma/Patagones, Argentina.
+El developer trabaja solo, es autodidacta, usa Windows + PowerShell + Cursor + Cline.
+
+REGLAS OBLIGATORIAS:
+- Leer .ai/CONTEXT.md antes de cualquier tarea
+- NO usar frameworks (React, Vue, Angular, etc.)
+- NO agregar build steps (Vite, Webpack, Parcel, etc.)
+- El stack es: HTML + CSS + JS Vanilla (ES Modules) + Supabase + Mapbox GL JS
+- Mobile-first siempre — se prueba en iPhone como PWA
+- Color de marca es VERDE, no reemplazarlo ni cambiarlo por otro
+- Comentarios en español
+- Variables en camelCase inglés
+- Un archivo por responsabilidad
+
+ANTES DE CADA TAREA:
+1. Leer .ai/CONTEXT.md para entender el estado actual
+2. Verificar .ai/TASKS.md para no duplicar trabajo
+3. Si la tarea genera un cambio importante, actualizar .ai/TASKS.md al terminar
+
+DEPLOY:
+- Repo: github.com/santeeeibra/movi2.0 rama main
+- Cada push a main redespliega Vercel automáticamente en https://movi2-0.vercel.app/
+- Verificar que los cambios no rompan el deploy antes de pushear
+
+RESPUESTAS:
+- Responder siempre en español
+- Soluciones concretas y aplicables directamente
+- No sugerir cambios de stack sin necesidad crítica

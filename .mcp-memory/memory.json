@@ -1,0 +1,7 @@
+{"type":"entity","name":"Movi","entityType":"proyecto","observations":["App de remises para Viedma/Patagones","Stack: HTML/CSS/JS vanilla + ES Modules, Supabase, Mapbox GL JS","Deploy en Vercel desde rama main","Repositorio santeeeibra/movi2.0","Color de marca verde","Mobile-first PWA"]}
+{"type":"entity","name":"Tarifas","entityType":"regla-negocio","observations":["Mínimo $2000","$200/km","$80/min"]}
+{"type":"entity","name":"Lugares","entityType":"feature","observations":["73 lugares verificados en Supabase","Tabla places","Columna veces_seleccionado","Umbral 3 clicks para marcar como no verificados","Optimización PostGIS mediante índice espacial GIST y RPC (get_places_in_radius)"]}
+{"type":"entity","name":"Bugs","entityType":"tareas","observations":["Panel dev roto","Menú perfil sin implementar","Config sin implementar","Ayuda sin implementar"]}
+{"type":"relation","from":"Movi","to":"Tarifas","relationType":"tiene"}
+{"type":"relation","from":"Movi","to":"Lugares","relationType":"incluye"}
+{"type":"relation","from":"Movi","to":"Bugs","relationType":"pendiente"}
