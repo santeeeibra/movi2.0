@@ -781,6 +781,34 @@ function enfocarCamaraConductor(posicion, heading) {
   });
 }
 
+// Mientras esta en true, iniciarTrackingConductor no debe pisar la camara
+// con enfocarCamaraConductor en cada fix de GPS: se usa durante el
+// panorama de ruta que se muestra al entrar a un viaje activo, antes de
+// pasar a la camara tipo GPS en tercera persona.
+let mostrandoPanoramaViajeConductor = false;
+let panoramaViajeConductorTimeoutId = null;
+
+// Muestra la ruta completa (desde el conductor hasta destino) de arriba,
+// sin inclinacion, para que se entienda el recorrido de un vistazo. Luego
+// de un momento, pasa sola a la camara inclinada tipo GPS que sigue al auto.
+function mostrarPanoramaRutaConductor(coordsRuta, posicionFinal, headingFinal) {
+  if (!coordsRuta || coordsRuta.length === 0) return;
+
+  const bounds = coordsRuta.reduce(
+    (acc, [lng, lat]) => acc.extend([lng, lat]),
+    new mapboxgl.LngLatBounds(coordsRuta[0], coordsRuta[0]),
+  );
+
+  mostrandoPanoramaViajeConductor = true;
+  map.fitBounds(bounds, { padding: 80, pitch: 0, bearing: 0, duration: 900 });
+
+  clearTimeout(panoramaViajeConductorTimeoutId);
+  panoramaViajeConductorTimeoutId = setTimeout(() => {
+    mostrandoPanoramaViajeConductor = false;
+    enfocarCamaraConductor(posicionFinal, headingFinal);
+  }, 2800);
+}
+
 // Formula de rumbo (bearing) entre dos coordenadas, en grados 0-360.
 // Respaldo para cuando el navegador no manda coords.heading (muy comun
 // con poca velocidad, GPS de baja precision, o en desktop).
@@ -841,7 +869,11 @@ function iniciarTrackingConductor(telefono) {
       // Vista del conductor: pinta su propio auto en 3D en el mapa con su
       // color, siguiendo cada fix de GPS (reemplaza al pin por defecto).
       agregarModeloAuto3D(map, { lat: actual.lat, lng: actual.lng, heading }, colorAutoPropioConductor);
-      enfocarCamaraConductor(actual, heading);
+      // Durante el panorama inicial de la ruta no queremos que cada fix de
+      // GPS pise la camara de arriba con la vista inclinada tipo GPS.
+      if (!mostrandoPanoramaViajeConductor) {
+        enfocarCamaraConductor(actual, heading);
+      }
 
       posicionAnteriorConductor = actual;
     },
@@ -860,6 +892,8 @@ function detenerTrackingConductor() {
   }
   posicionAnteriorConductor = null;
   ultimoEnvioGpsConductor = 0;
+  clearTimeout(panoramaViajeConductorTimeoutId);
+  mostrandoPanoramaViajeConductor = false;
 }
 
 // ==================================================================
@@ -998,8 +1032,62 @@ function renderListaPendientes(viajes, paradasPorViaje) {
   }).join('');
 
   driverPendingList.querySelectorAll('.driver-pending-aceptar').forEach((btn) => {
-    btn.addEventListener('click', () => aceptarViaje(btn.dataset.id, btn));
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      aceptarViaje(btn.dataset.id, btn);
+    });
   });
+
+  // Tocar la tarjeta (fuera del boton "Aceptar") muestra el panorama de esa
+  // ruta en el mapa de fondo, para que el conductor pueda decidir si le
+  // conviene antes de aceptarla.
+  driverPendingList.querySelectorAll('.driver-pending-card').forEach((card) => {
+    card.addEventListener('click', () => {
+      const viaje = viajes.find((v) => String(v.id) === card.dataset.id);
+      if (viaje) previsualizarRutaViajePendiente(viaje, paradasPorViaje[viaje.id] || []);
+    });
+  });
+}
+
+// Evita que la respuesta de una previsualizacion vieja (el conductor toco
+// otra tarjeta mientras la primera todavia estaba pidiendo la ruta) pise
+// a la mas nueva cuando llega tarde.
+let previsualizacionRutaToken = 0;
+
+// Traza en el mapa la ruta real desde donde esta el conductor hasta el
+// origen del pasajero (y de ahi al destino), para que el conductor tenga
+// una guia visual de adonde tendria que dirigirse antes de aceptar el viaje.
+async function previsualizarRutaViajePendiente(viaje, paradasViaje) {
+  if (viaje.origen_lat == null || viaje.origen_lng == null) return;
+  if (!map.getSource('ruta')) return;
+
+  const miToken = ++previsualizacionRutaToken;
+
+  const posActual = await obtenerPosicionActualConductor();
+  if (miToken !== previsualizacionRutaToken) return; // se toco otra tarjeta mientras tanto
+
+  const origen = { lat: viaje.origen_lat, lng: viaje.origen_lng };
+  const destino = paradasViaje.length > 0
+    ? paradasViaje[paradasViaje.length - 1]
+    : (viaje.destino_lat != null && viaje.destino_lng != null
+      ? { lat: viaje.destino_lat, lng: viaje.destino_lng }
+      : null);
+
+  const puntos = [posActual || origen, origen, ...(destino && posActual ? [destino] : [])].filter(Boolean);
+  const ruta = puntos.length > 1 ? await getRuta(puntos) : null;
+  if (miToken !== previsualizacionRutaToken) return;
+
+  const bounds = new mapboxgl.LngLatBounds([origen.lng, origen.lat], [origen.lng, origen.lat]);
+  if (posActual) bounds.extend([posActual.lng, posActual.lat]);
+  if (destino && destino.lat != null && destino.lng != null) bounds.extend([destino.lng, destino.lat]);
+
+  if (ruta?.geometry) {
+    aplicarEstiloRuta('hacia_pasajero');
+    map.getSource('ruta').setData({ type: 'Feature', properties: {}, geometry: ruta.geometry });
+    (ruta.geometry.coordinates || []).forEach(([lng, lat]) => bounds.extend([lng, lat]));
+  }
+
+  map.fitBounds(bounds, { padding: 90, pitch: 0, bearing: 0, duration: 700 });
 }
 
 function iniciarListaPendientes() {
@@ -1188,7 +1276,9 @@ async function dibujarRutaConductorHaciaOrigen(viaje) {
   rutaGeometriaActual = ruta.geometry?.coordinates || null;
   window._iniciarAnimacionGlow?.();
 
-  enfocarCamaraConductor(posActual, posicionConductor?.heading);
+  // Primero se ve el panorama completo del recorrido, y recien despues la
+  // camara pasa sola a la vista en tercera persona detras del auto.
+  mostrarPanoramaRutaConductor(rutaGeometriaActual, posActual);
 }
 
 async function dibujarRutaConductorViajeCompleto(viaje) {
