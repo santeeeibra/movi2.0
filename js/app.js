@@ -1003,6 +1003,11 @@ function renderListaPendientes(viajes, paradasPorViaje) {
 
   if (viajes.length === 0) {
     driverPendingList.innerHTML = '<div class="result-empty">No hay viajes pendientes por ahora</div>';
+    previsualizacionRutaToken += 1; // invalida cualquier previsualizacion en curso
+    if (map.getSource('ruta')) {
+      map.getSource('ruta').setData({ type: 'FeatureCollection', features: [] });
+    }
+    driverWaitingOverlay.classList.remove('ruta-visible');
     return;
   }
 
@@ -1047,6 +1052,11 @@ function renderListaPendientes(viajes, paradasPorViaje) {
       if (viaje) previsualizarRutaViajePendiente(viaje, paradasPorViaje[viaje.id] || []);
     });
   });
+
+  // Guia visual automatica: apenas aparece la lista de pendientes, se
+  // traza sola la ruta del primero (el mas reciente) — el conductor no
+  // tiene por que saber que hay que tocar la tarjeta para verla.
+  previsualizarRutaViajePendiente(viajes[0], paradasPorViaje[viajes[0].id] || []);
 }
 
 // Evita que la respuesta de una previsualizacion vieja (el conductor toco
@@ -1085,6 +1095,7 @@ async function previsualizarRutaViajePendiente(viaje, paradasViaje) {
     aplicarEstiloRuta('hacia_pasajero');
     map.getSource('ruta').setData({ type: 'Feature', properties: {}, geometry: ruta.geometry });
     (ruta.geometry.coordinates || []).forEach(([lng, lat]) => bounds.extend([lng, lat]));
+    driverWaitingOverlay.classList.add('ruta-visible');
   }
 
   map.fitBounds(bounds, { padding: 90, pitch: 0, bearing: 0, duration: 700 });
@@ -1189,6 +1200,7 @@ async function entrarAVistaViajeActiva(viaje) {
   conductorViajeActivo = viaje;
   mostrarOverlay(null);
   driverWaitingOverlay.classList.remove('show');
+  driverWaitingOverlay.classList.remove('ruta-visible');
   sheet.style.display = 'none'; // el sheet de pasajero no debe verse detras en sesion de conductor
   // FIX: si en esta misma sesion de navegador ya se uso la app como
   // pasajero y se llego a ver "Viaje completado" (payment-sheet), ese

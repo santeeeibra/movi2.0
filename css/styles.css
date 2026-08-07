@@ -1606,6 +1606,17 @@ body {
 /*  FASE 1 — Disponibilidad del conductor                            */
 /* ================================================================ */
 .driver-home-sheet { text-align: left; max-height: 78vh; }
+
+/* Mientras hay una ruta previsualizada en el mapa (viaje pendiente), se
+   achica la hoja y se aclara el fondo del overlay para que la ruta se
+   pueda ver arriba en vez de quedar tapada/oscurecida. Se aplica solo a
+   este overlay puntual, no a los demas overlays de "Liquid Glass". */
+#driver-waiting-overlay.ruta-visible .driver-home-sheet { max-height: 46vh; }
+#driver-waiting-overlay.ruta-visible {
+  background: rgba(43, 38, 33, 0.25);
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+}
 .driver-home-header {
   display: flex;
   align-items: center;
