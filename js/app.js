@@ -755,7 +755,10 @@ btnLoginContinuar.addEventListener('click', async () => {
 //  una asignacion real, pero en el flujo actual no se va a disparar
 //  sola todavia (ver el resumen que le doy al usuario aparte).
 // ==================================================================
-const ESTADOS_VIAJE_INACTIVO_CONDUCTOR = ['pendiente', 'finalizado', 'cancelado'];
+// La vista del conductor solo puede existir para estos estados. Usar una
+// lista explicita evita que un estado nuevo, corrupto o inesperado termine
+// mostrandose como "Yendo a buscar al pasajero".
+const ESTADOS_VIAJE_ACTIVO_CONDUCTOR = ['conductor_asignado', 'llegó', 'en_viaje'];
 
 let watchIdConductor = null;
 let posicionAnteriorConductor = null;
@@ -1246,15 +1249,20 @@ btnConductorFinalizar.addEventListener('click', async () => {
 });
 
 // ---- FASE 5: al terminar/cancelarse, volver a la lista de pendientes ----
-async function salirDeVistaViajeActiva() {
+function limpiarEstadoLocalViajeConductor() {
   conductorViajeActivo = null;
+  detenerTrackingConductor();
   driverActiveSheet.style.display = 'none';
-  sheet.style.display = ''; // deja que la hoja de pasajero vuelva a su estado normal por si se cambia de rol
 
   if (map.getSource('ruta')) {
     map.getSource('ruta').setData({ type: 'FeatureCollection', features: [] });
   }
   rutaGeometriaActual = null;
+}
+
+async function salirDeVistaViajeActiva() {
+  limpiarEstadoLocalViajeConductor();
+  sheet.style.display = ''; // deja que la hoja de pasajero vuelva a su estado normal por si se cambia de rol
 
   if (conductorTelefonoActual) {
     await supabase.from('conductores').update({ disponible: true }).eq('telefono', conductorTelefonoActual);
@@ -1267,7 +1275,7 @@ async function salirDeVistaViajeActiva() {
 }
 
 function evaluarViajeConductor(viaje, telefono) {
-  const activo = viaje && !ESTADOS_VIAJE_INACTIVO_CONDUCTOR.includes(viaje.estado);
+  const activo = viaje && ESTADOS_VIAJE_ACTIVO_CONDUCTOR.includes(viaje.estado);
 
   if (activo) {
     iniciarTrackingConductor(telefono);
@@ -1283,8 +1291,9 @@ function evaluarViajeConductor(viaje, telefono) {
       }
     }
   } else {
-    detenerTrackingConductor();
-    if (conductorViajeActivo) {
+    const habiaViajeActivo = Boolean(conductorViajeActivo);
+    limpiarEstadoLocalViajeConductor();
+    if (habiaViajeActivo) {
       // Si el conductor mismo lo finalizo (toco "Finalizar viaje"), ya lo
       // sabe — el aviso es solo para cuando se entera de una cancelacion.
       if (viaje && viaje.estado === 'cancelado') {
@@ -1297,6 +1306,10 @@ function evaluarViajeConductor(viaje, telefono) {
         );
       }
       salirDeVistaViajeActiva();
+    } else {
+      // Tambien limpiar la vista si el backend devuelve null o un viaje
+      // cancelado durante la carga inicial: no debe quedar un sheet viejo.
+      driverWaitingOverlay.classList.add('show');
     }
   }
 }
@@ -1336,13 +1349,14 @@ function iniciarSupervisionViajeConductor(telefono) {
     .from('viajes')
     .select('*')
     .eq('conductor_telefono', telefono)
-    .not('estado', 'in', '(pendiente,finalizado,cancelado)')
+    .in('estado', ESTADOS_VIAJE_ACTIVO_CONDUCTOR)
     .order('creado_en', { ascending: false })
     .limit(1)
     .maybeSingle()
     .then(({ data, error }) => {
       if (error) {
         console.error('[Movi] Error buscando viaje activo del conductor:', error);
+        evaluarViajeConductor(null, telefono);
         return;
       }
       evaluarViajeConductor(data, telefono);
@@ -1371,7 +1385,7 @@ document.addEventListener('visibilitychange', () => {
     .from('viajes')
     .select('*')
     .eq('conductor_telefono', conductorTelefonoActual)
-    .not('estado', 'in', '(pendiente,finalizado,cancelado)')
+    .in('estado', ESTADOS_VIAJE_ACTIVO_CONDUCTOR)
     .order('creado_en', { ascending: false })
     .limit(1)
     .maybeSingle()
