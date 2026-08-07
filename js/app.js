@@ -897,6 +897,7 @@ function cerrarSesion() {
   }
   detenerSeguimientoPosicionConductor();
   detenerListaPendientes();
+  limpiarRutaPendiente();
   simAutoDetener();
   conductorTelefonoActual = null;
   conductorViajeActivo = null;
@@ -964,11 +965,47 @@ function textoHaceCuanto(fechaISO) {
   return `hace ${minutos} min`;
 }
 
+// Dibuja en el mapa (visible detras del sheet de espera, ver CSS de
+// #driver-waiting-overlay) la ruta de un viaje todavia pendiente, para
+// que el conductor pueda ver el recorrido completo antes de decidir si
+// lo acepta o no. A diferencia de dibujarRutaConductorHaciaOrigen/
+// ...ViajeCompleto (que se usan ya con el viaje aceptado), esto no
+// depende de la posicion GPS del conductor y encuadra la ruta entera
+// con fitBounds en vez de seguir la camara.
+async function previsualizarRutaPendiente(viaje, paradasViaje) {
+  if (!map.getSource('ruta') || viaje.origen_lat == null || viaje.origen_lng == null) return;
+
+  const origen = { lat: viaje.origen_lat, lng: viaje.origen_lng };
+  const puntos = paradasViaje.length > 0
+    ? [origen, ...paradasViaje.map((p) => ({ lat: p.lat, lng: p.lng }))]
+    : (viaje.destino_lat != null && viaje.destino_lng != null
+      ? [origen, { lat: viaje.destino_lat, lng: viaje.destino_lng }]
+      : null);
+  if (!puntos) return;
+
+  const ruta = await getRuta(puntos);
+  if (!ruta || !map.getSource('ruta')) return;
+
+  aplicarEstiloRuta('hacia_pasajero');
+  map.getSource('ruta').setData({ type: 'Feature', properties: {}, geometry: ruta.geometry });
+
+  const bounds = new mapboxgl.LngLatBounds();
+  puntos.forEach((p) => bounds.extend([p.lng, p.lat]));
+  map.fitBounds(bounds, { padding: { top: 90, bottom: 260, left: 60, right: 60 }, maxZoom: 16, duration: 600 });
+}
+
+function limpiarRutaPendiente() {
+  if (map.getSource('ruta')) {
+    map.getSource('ruta').setData({ type: 'FeatureCollection', features: [] });
+  }
+}
+
 function renderListaPendientes(viajes, paradasPorViaje) {
   if (!conductorDisponible) return; // no pintamos nada si esta en "no disponible"
 
   if (viajes.length === 0) {
     driverPendingList.innerHTML = '<div class="result-empty">No hay viajes pendientes por ahora</div>';
+    limpiarRutaPendiente();
     return;
   }
 
@@ -998,8 +1035,25 @@ function renderListaPendientes(viajes, paradasPorViaje) {
   }).join('');
 
   driverPendingList.querySelectorAll('.driver-pending-aceptar').forEach((btn) => {
-    btn.addEventListener('click', () => aceptarViaje(btn.dataset.id, btn));
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation(); // no relanzar la previsualizacion de ruta de la card al aceptar
+      aceptarViaje(btn.dataset.id, btn);
+    });
   });
+
+  // Tocar una card (fuera del boton Aceptar) muestra su ruta en el mapa,
+  // asi el conductor puede comparar viajes antes de elegir cual tomar.
+  driverPendingList.querySelectorAll('.driver-pending-card').forEach((card) => {
+    card.addEventListener('click', () => {
+      const viaje = viajes.find((v) => String(v.id) === card.dataset.id);
+      if (viaje) previsualizarRutaPendiente(viaje, paradasPorViaje[viaje.id] || []);
+    });
+  });
+
+  // Al refrescar la lista, mostrar de entrada la ruta del viaje mas
+  // reciente (primero de la lista) para que el conductor no tenga que
+  // tocar nada para ver algo.
+  previsualizarRutaPendiente(viajes[0], paradasPorViaje[viajes[0].id] || []);
 }
 
 function iniciarListaPendientes() {
@@ -1049,6 +1103,7 @@ toggleDisponible.addEventListener('click', async () => {
   } else {
     detenerListaPendientes();
     driverPendingList.innerHTML = '';
+    limpiarRutaPendiente();
   }
 });
 

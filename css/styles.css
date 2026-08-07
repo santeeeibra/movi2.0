@@ -1605,7 +1605,23 @@ body {
 /* ================================================================ */
 /*  FASE 1 — Disponibilidad del conductor                            */
 /* ================================================================ */
-.driver-home-sheet { text-align: left; max-height: 78vh; }
+.driver-home-sheet { text-align: left; max-height: 60vh; }
+
+/* El waiting screen del conductor usa .login-overlay para el show/hide,
+   pero a diferencia de un login real necesita dejar ver el mapa (y la
+   ruta del viaje pendiente pintada sobre el) detras, igual que el resto
+   de las pantallas de conductor (driver-active-sheet). Si tapa el mapa
+   con fondo oscuro + blur, el conductor no puede evaluar el viaje antes
+   de aceptarlo. */
+#driver-waiting-overlay {
+  background: transparent;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  pointer-events: none;
+}
+#driver-waiting-overlay .driver-home-sheet {
+  pointer-events: auto;
+}
 .driver-home-header {
   display: flex;
   align-items: center;
