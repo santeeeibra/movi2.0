@@ -977,6 +977,8 @@ function textoHaceCuanto(fechaISO) {
 // ...ViajeCompleto (que se usan ya con el viaje aceptado), esto no
 // depende de la posicion GPS del conductor y encuadra la ruta entera
 // con fitBounds en vez de seguir la camara.
+let marcadorDestinoPendiente = null;
+
 async function previsualizarRutaPendiente(viaje, paradasViaje) {
   if (!map.getSource('ruta') || viaje.origen_lat == null || viaje.origen_lng == null) return;
 
@@ -991,8 +993,16 @@ async function previsualizarRutaPendiente(viaje, paradasViaje) {
   const ruta = await getRuta(puntos);
   if (!ruta || !map.getSource('ruta')) return;
 
-  aplicarEstiloRuta('hacia_pasajero');
+  aplicarEstiloRuta('vista_previa');
   map.getSource('ruta').setData({ type: 'Feature', properties: {}, geometry: ruta.geometry });
+
+  const destino = puntos[puntos.length - 1];
+  if (marcadorDestinoPendiente) marcadorDestinoPendiente.remove();
+  const el = document.createElement('div');
+  el.className = 'destino-pendiente-marker';
+  marcadorDestinoPendiente = new mapboxgl.Marker({ element: el, anchor: 'bottom' })
+    .setLngLat([destino.lng, destino.lat])
+    .addTo(map);
 
   const bounds = new mapboxgl.LngLatBounds();
   puntos.forEach((p) => bounds.extend([p.lng, p.lat]));
@@ -1002,6 +1012,10 @@ async function previsualizarRutaPendiente(viaje, paradasViaje) {
 function limpiarRutaPendiente() {
   if (map.getSource('ruta')) {
     map.getSource('ruta').setData({ type: 'FeatureCollection', features: [] });
+  }
+  if (marcadorDestinoPendiente) {
+    marcadorDestinoPendiente.remove();
+    marcadorDestinoPendiente = null;
   }
 }
 
@@ -1217,7 +1231,14 @@ async function obtenerPosicionActualConductor() {
 function aplicarEstiloRuta(tipo) {
   if (!map.getLayer('ruta-linea') || !map.getLayer('ruta-glow')) return;
 
-  if (tipo === 'hacia_pasajero') {
+  if (tipo === 'vista_previa') {
+    // Ruta de un viaje todavia pendiente (conductor evaluando si acepta):
+    // violeta, para distinguirla claramente del "voy hacia el pasajero"
+    // (azul) y del viaje en curso (verde de marca).
+    map.setPaintProperty('ruta-linea', 'line-color', '#7C5CFF');
+    map.setPaintProperty('ruta-linea', 'line-dasharray', [2, 1.6]);
+    map.setPaintProperty('ruta-glow', 'line-color', '#7C5CFF');
+  } else if (tipo === 'hacia_pasajero') {
     map.setPaintProperty('ruta-linea', 'line-color', '#2E7DD7');
     map.setPaintProperty('ruta-linea', 'line-dasharray', [2, 1.6]);
     map.setPaintProperty('ruta-glow', 'line-color', '#2E7DD7');

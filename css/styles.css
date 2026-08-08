@@ -1059,6 +1059,62 @@ body {
   100% { transform: translateX(-50%) scale(1); opacity: 1; }
 }
 
+/* Pin de destino en la vista previa de un viaje pendiente (conductor):
+   cae con rebote sobre el mapa al dibujarse la ruta, para que el ojo
+   encuentre rapido donde termina el viaje. Reutiliza el mismo lenguaje
+   visual (circulo + borde blanco + sombra elíptica) que origen/parada. */
+.destino-pendiente-marker {
+  position: relative;
+  width: 26px;
+  height: 26px;
+  border-radius: 50% 50% 50% 0;
+  transform: rotate(-45deg);
+  background: var(--negro);
+  border: 3px solid #ffffff;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+  animation: destinoPendienteCae 0.42s var(--ease-bounce);
+}
+.destino-pendiente-marker::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #ffffff;
+  transform: translate(-50%, -50%) rotate(45deg);
+}
+.destino-pendiente-marker::after {
+  content: '';
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  width: 16px;
+  height: 6px;
+  margin-top: 1px;
+  transform: translateX(-50%) rotate(45deg) scale(0);
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.2);
+  filter: blur(2px);
+  z-index: -1;
+  animation: destinoPendienteSombra 0.42s var(--ease-bounce) forwards;
+}
+@keyframes destinoPendienteCae {
+  0% { opacity: 0; transform: rotate(-45deg) translateY(-18px) scale(0.6); }
+  100% { opacity: 1; transform: rotate(-45deg) translateY(0) scale(1); }
+}
+@keyframes destinoPendienteSombra {
+  0% { transform: translateX(-50%) rotate(45deg) scale(0); opacity: 0; }
+  100% { transform: translateX(-50%) rotate(45deg) scale(1); opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .destino-pendiente-marker,
+  .destino-pendiente-marker::after {
+    animation-duration: 0.01ms !important;
+  }
+}
+
 .comment-input:focus { outline: 2px solid var(--verde); }
 
 /* Aviso: origen movido a mano, hay que confirmarlo antes de pedir viaje */
