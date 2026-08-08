@@ -4,3 +4,5 @@ dist/
 .DS_Store
 .cursor/hooks.json
 .mcp-memory/memory.json
+.cursor/hooks.json
+.mcp-memory/memory.json
