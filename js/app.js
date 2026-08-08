@@ -1587,6 +1587,12 @@ map.on('load', () => {
   const AUTO_MODEL_ROTATION_OFFSET = 180;
   const AUTO_MODEL_ROTATION = [0, 0, ['+', ['get', 'heading'], AUTO_MODEL_ROTATION_OFFSET]];
 
+  // FIX auto "fuera de la calle": con la camara del conductor en pitch 55°
+  // (ver enfocarCamaraConductor), un modelo cuyo origen no queda exactamente
+  // al nivel del piso se ve desplazado en pantalla (a mas pitch, mas
+  // corrimiento visual, aunque las coordenadas geograficas sean correctas).
+  // 'model-elevation-reference: ground' fuerza a Mapbox a anclar el modelo
+  // al nivel del terreno en vez de a la elevacion que trae el .glb.
   map.addLayer({
     id: 'auto-wheels',
     type: 'model',
@@ -1595,6 +1601,7 @@ map.on('load', () => {
     paint: {
       'model-rotation': AUTO_MODEL_ROTATION,
       'model-scale': AUTO_MODEL_SCALE,
+      'model-elevation-reference': 'ground',
       'model-color-mix-intensity': 0,
       'model-cast-shadows': true,
     },
@@ -1608,6 +1615,7 @@ map.on('load', () => {
     paint: {
       'model-rotation': AUTO_MODEL_ROTATION,
       'model-scale': AUTO_MODEL_SCALE,
+      'model-elevation-reference': 'ground',
       'model-color-mix-intensity': 0,
       'model-cast-shadows': true,
     },
@@ -1621,6 +1629,7 @@ map.on('load', () => {
     paint: {
       'model-rotation': AUTO_MODEL_ROTATION,
       'model-scale': AUTO_MODEL_SCALE,
+      'model-elevation-reference': 'ground',
       'model-color-mix-intensity': 0,
       'model-cast-shadows': true,
     },
@@ -1634,6 +1643,7 @@ map.on('load', () => {
     paint: {
       'model-rotation': AUTO_MODEL_ROTATION,
       'model-scale': AUTO_MODEL_SCALE,
+      'model-elevation-reference': 'ground',
       'model-color': ['get', 'colorHex'],
       'model-color-mix-intensity': 1,
       'model-cast-shadows': true,
