@@ -314,6 +314,11 @@ function mostrarOverlay(el) {
   [roleSelectOverlay, loginOverlay, conductorFormOverlay, conductorVerificarOverlay, driverWaitingOverlay]
     .forEach(o => o.classList.remove('show'));
   if (el) el.classList.add('show');
+  // FIX: driver-waiting-overlay ya no tiene fondo opaco (se saco el blur para
+  // que el conductor vea el mapa/ruta detras), asi que el sheet de pasajero
+  // ("A donde vamos?") queda visible y superpuesto detras suyo si no se
+  // oculta explicitamente aca.
+  sheet.style.display = (el === driverWaitingOverlay) ? 'none' : '';
 }
 
 // ==================================================================
@@ -1364,7 +1369,7 @@ function evaluarViajeConductor(viaje, telefono) {
     } else {
       // Tambien limpiar la vista si el backend devuelve null o un viaje
       // cancelado durante la carga inicial: no debe quedar un sheet viejo.
-      driverWaitingOverlay.classList.add('show');
+      mostrarOverlay(driverWaitingOverlay);
     }
   }
 }
