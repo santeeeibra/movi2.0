@@ -2242,6 +2242,12 @@ function renderParadasPanel() {
 // en el mapa): segun modoBusqueda, agrega una parada nueva o reemplaza el
 // destino final. Despues de procesar, vuelve siempre al modo por defecto.
 function mostrarDestino(lat, lng, direccion) {
+  // El conductor solo puede recibir y aceptar viajes ya pedidos por el
+  // pasajero — nunca elegir, modificar ni borrar un destino. Esta funcion
+  // es el punto de entrada unico (busqueda o toque en el mapa), asi que
+  // bloquearla aca cubre ambos vectores de una sola vez.
+  if (rol === 'conductor') return;
+
   // FIX: no dejar cambiar destino ni agregar parada si ya hay un viaje
   // pedido y en curso. Antes esta funcion pisaba destinoActual/paradas
   // y recalculaba la ruta igual aunque el sheet de pedir viaje ya
