@@ -2707,7 +2707,7 @@ btnModificarDestino.addEventListener('click', async () => {
   if (viajeActivoPasajero !== null && viajeActivoPasajero.estado !== 'pendiente') {
     const confirmar = await mostrarConfirm(
       '¿Modificar el destino? El precio del viaje se va a recalcular.',
-      'Modificar',
+      'Confirmar',
       'Cancelar'
     );
     if (!confirmar) return;
