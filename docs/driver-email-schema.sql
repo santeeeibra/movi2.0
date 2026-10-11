@@ -1,6 +1,8 @@
 -- Propuesta de esquema para revisar DESPUES del preflight.
--- No se ha ejecutado en el proyecto real: sus politicas y triggers no
--- estan disponibles mediante la cuenta de Supabase conectada a Codex.
+-- No se ha ejecutado en el proyecto real. El preflight se reviso el
+-- 2026-10-11 con santi MOVI: existen politicas publicas y un webhook n8n.
+-- Coordinar con SMTP, perfiles verificados y despliegue del nuevo cliente;
+-- aplicar estas restricciones antes bloquearia al cliente publicado.
 -- Los perfiles anteriores conservan auth_user_id NULL: solo el propietario
 -- debe vincularlos a un usuario cuyo correo ya este verificado.
 begin;

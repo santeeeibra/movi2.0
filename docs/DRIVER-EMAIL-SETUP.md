@@ -3,13 +3,29 @@
 Este parche esta preparado en una copia de trabajo. No se ha desplegado,
 no se han enviado correos y no se ha modificado la base de produccion.
 
-## 1. Conectar el proyecto correcto
+## 1. Proyecto conectado y revision del esquema
 
-Movi utiliza `lapnbdpdkkeaaavvkfqc`. La cuenta de Supabase disponible en
-esta sesion no incluye ese proyecto. Conectar la cuenta propietaria sin
-compartir contrasenas ni claves en el chat.
+Movi utiliza `lapnbdpdkkeaaavvkfqc`. El 11 de octubre de 2026 se comprobo
+el acceso mediante la cuenta conectada `santi MOVI`; el proyecto MOVI esta
+activo. Se consultaron solo metadatos y cantidades, sin modificar registros.
 
-Ejecutar primero `driver-email-preflight.sql` (solo lectura). Revisar las
+El preflight real confirma:
+- `conductores` aun no tiene `auth_user_id`; hay cero usuarios en Auth.
+- El ID de conductor es autogenerado y el telefono ya tiene indice UNIQUE.
+- Ambas tablas tienen RLS, pero sus politicas actuales permiten SELECT,
+  INSERT y UPDATE publicos sin comprobar identidad ni propiedad.
+- Hay 11 perfiles y 48 viajes, de los cuales 12 conservan un estado activo.
+  Estos estados no demuestran que los viajes sigan ocurriendo en la calle.
+- Un trigger de viajes envia INSERT y UPDATE a un webhook de n8n.
+  No se invoco; revisar sus destinatarios y costos antes de generar pruebas.
+
+No aplicar las restricciones mientras la web publicada siga usando acceso
+por telefono sin autenticar: impedirian las escrituras de sus conductores.
+Preparar la activacion del correo, vincular perfiles existentes con identidad
+verificada y coordinar la migracion con la publicacion de la nueva version.
+No finalizar ni borrar viajes existentes para despejar las pruebas.
+
+Repetir `driver-email-preflight.sql` (solo lectura) antes del despliegue. Revisar las
 columnas, permisos y triggers existentes antes de aplicar la propuesta
 `driver-email-schema.sql`. Asegurar tambien una restriccion UNIQUE para
 `conductores.telefono`, que es la identidad de contacto usada por el codigo
