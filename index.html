@@ -398,6 +398,11 @@
       </div>
 
       <div class="login-field">
+        <label class="login-label" for="conductor-email">Correo electrónico</label>
+        <input class="login-input" id="conductor-email" type="email" placeholder="Tu correo para ingresar" autocomplete="email" />
+      </div>
+
+      <div class="login-field">
         <label class="login-label" for="conductor-patente">Patente</label>
         <input class="login-input" id="conductor-patente" type="text" placeholder="Ej: AB123CD" />
       </div>
@@ -433,7 +438,7 @@
   </div>
 
   <!-- ================================================================ -->
-  <!--  Verificacion de telefono por SMS (conductor)                    -->
+  <!--  Acceso por codigo de correo (conductor)                        -->
   <!-- ================================================================ -->
   <div class="login-overlay" id="conductor-verificar-overlay">
     <div class="login-sheet">
@@ -441,12 +446,12 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
       </button>
       <div class="login-logo">M</div>
-      <div class="login-title">Verificá tu teléfono</div>
-      <div class="login-subtitle" id="conductor-verificar-sub">Te mandamos un código por SMS</div>
+      <div class="login-title">Revisá tu correo</div>
+      <div class="login-subtitle" id="conductor-verificar-sub">Ingresá el código que te enviamos por correo</div>
 
       <div class="login-field">
         <label class="login-label" for="conductor-codigo">Código de 6 dígitos</label>
-        <input class="login-input" id="conductor-codigo" type="text" inputmode="numeric" maxlength="6" placeholder="123456" />
+        <input class="login-input" id="conductor-codigo" type="text" inputmode="numeric" maxlength="6" placeholder="123456" autocomplete="one-time-code" />
       </div>
 
       <button class="cta" id="btn-verificar-codigo">
@@ -497,9 +502,15 @@
 
     <div class="driver-active-info" id="driver-active-info"></div>
 
+    <div class="contact-row">
+      <button class="contact-btn" id="btn-conductor-llamar" type="button">Llamar al pasajero</button>
+      <button class="contact-btn" id="btn-conductor-whatsapp" type="button">WhatsApp</button>
+    </div>
+
     <button class="cta" id="btn-conductor-llegue">Llegué</button>
     <button class="cta" id="btn-conductor-iniciar" style="display:none;">Iniciar viaje</button>
     <button class="cta" id="btn-conductor-finalizar" style="display:none;">Finalizar viaje</button>
+    <button class="cancel-btn" id="btn-conductor-cancelar" type="button">Cancelar recogida</button>
   </div>
 
   <!-- ================================================================ -->

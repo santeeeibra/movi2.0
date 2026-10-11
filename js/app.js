@@ -7,6 +7,7 @@ import { supabase, getLugares, searchLugares, reverseGeocode, registrarSeleccion
 import { MAPBOX_TOKEN } from './config.js';
 import { searchMapbox, getRuta } from './apiservices.js';
 import { initMonitoring } from './monitoring.js';
+import { createDriverAuth } from './driverauth.js';
 
 // ==================================================================
 //  SISTEMA ANTI-CACHE-VIEJO: cada build tiene un identificador unico
@@ -276,6 +277,7 @@ const btnSoyConductor = document.getElementById('btn-soy-conductor');
 // Conductor form fields
 const conductorNombre = document.getElementById('conductor-nombre');
 const conductorTelefono = document.getElementById('conductor-telefono');
+const conductorEmail = document.getElementById('conductor-email');
 const conductorPatente = document.getElementById('conductor-patente');
 const conductorModelo = document.getElementById('conductor-modelo');
 const btnGuardarConductor = document.getElementById('btn-guardar-conductor');
@@ -317,48 +319,11 @@ function mostrarOverlay(el) {
 }
 
 // ==================================================================
-//  Verificacion de telefono por SMS (Twilio Verify via Supabase Edge
-//  Functions "enviar-codigo" / "verificar-codigo"). Ver CLAUDE.md.
+//  Acceso por codigo de correo, sin SMS ni llamadas a Twilio.
 // ==================================================================
-const SUPABASE_FUNCTIONS_URL = 'https://lapnbdpdkkeaaavvkfqc.supabase.co/functions/v1';
-
-async function enviarCodigoSMS(telefono) {
-  try {
-    const res = await fetch(`${SUPABASE_FUNCTIONS_URL}/enviar-codigo`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ telefono }),
-    });
-    const data = await res.json();
-    if (!res.ok) {
-      return { ok: false, error: data.error || 'No se pudo enviar el codigo' };
-    }
-    return { ok: true };
-  } catch (err) {
-    console.error('[Movi] Error de red enviando codigo SMS:', err);
-    return { ok: false, error: 'Sin conexion. Revisá tu internet e intentá de nuevo.' };
-  }
-}
-
-async function verificarCodigoSMS(telefono, codigo) {
-  try {
-    const res = await fetch(`${SUPABASE_FUNCTIONS_URL}/verificar-codigo`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ telefono, codigo }),
-    });
-    const data = await res.json();
-    if (!res.ok || !data.ok) {
-      return { ok: false, error: data.error || 'Código incorrecto o vencido' };
-    }
-    return { ok: true };
-  } catch (err) {
-    console.error('[Movi] Error de red verificando codigo SMS:', err);
-    return { ok: false, error: 'Sin conexion. Revisá tu internet e intentá de nuevo.' };
-  }
-}
-
-let telefonoConductorPendienteVerificar = null;
+const driverAuth = createDriverAuth(supabase);
+let registroConductorPendiente = null;
+let ultimoCodigoEnviadoEn = 0;
 
 // FIX: estos dos botones tienen el HTML/CSS desde hace rato (Fase 0),
 // pero nunca llegaron a tener el addEventListener enganchado — se
@@ -438,11 +403,6 @@ function mostrarConfirm(texto, textoConfirmar = 'Confirmar', textoCancelar = 'Ca
   });
 }
 
-function ocultarLoginYApp() {
-  // Hide map UI elements when showing role screens
-  inicioMapa = true; // prevent map init if we're going to show something else
-}
-
 // Inicial: decidir qué mostrar según localStorage.
 //
 // Se ejecuta como funcion y se invoca REcien al final del modulo (ver la
@@ -455,23 +415,27 @@ function ocultarLoginYApp() {
 // la zona muerta temporal porque se declaraban mas abajo en el archivo.
 // `rol` se lee a nivel de modulo porque mas abajo (al configurar el mapa)
 // se decide si el pin de origen es arrastrable segun el rol (linea 1938).
-const rol = localStorage.getItem('rol');
+let rol = localStorage.getItem('rol');
 
-function iniciarSesionSegunRol() {
-  const conductorTelefonoLS = localStorage.getItem('conductor_telefono');
+async function iniciarSesionSegunRol() {
   const usuarioExistente = cargarUsuario();
 
   if (rol === 'conductor') {
-    if (conductorTelefonoLS) {
-      // Conductor ya registrado → pantalla de espera
+    bloquearApp(true);
+    try {
+      const perfil = await driverAuth.loadProfile();
+      if (!perfil) {
+        mostrarOverlay(conductorFormOverlay);
+        return;
+      }
+      localStorage.setItem('conductor_telefono', perfil.telefono);
       mostrarOverlay(driverWaitingOverlay);
-      bloquearApp(true);
-      iniciarSupervisionViajeConductor(conductorTelefonoLS);
-    } else {
-      // Conductor sin datos → formulario
+      iniciarSupervisionViajeConductor(perfil.telefono);
+    } catch {
+      localStorage.removeItem('conductor_telefono');
       mostrarOverlay(conductorFormOverlay);
-      bloquearApp(true);
     }
+
   } else if (rol === 'pasajero') {
     const pasajeroTelefonoLS = localStorage.getItem('pasajero_telefono');
     if (pasajeroTelefonoLS) {
@@ -495,6 +459,7 @@ function iniciarSesionSegunRol() {
 
 // "Soy Pasajero"
 btnSoyPasajero.addEventListener('click', () => {
+  rol = 'pasajero';
   localStorage.setItem('rol', 'pasajero');
   mostrarOverlay(loginOverlay);
   bloquearApp(true);
@@ -502,21 +467,13 @@ btnSoyPasajero.addEventListener('click', () => {
 
 // "Soy Conductor"
 btnSoyConductor.addEventListener('click', () => {
+  rol = 'conductor';
   localStorage.setItem('rol', 'conductor');
   mostrarOverlay(conductorFormOverlay);
   bloquearApp(true);
 });
 
-// Guardar datos del conductor en Supabase
-async function upsertConductor(nombre, telefono, patente, modeloAuto, colorAuto) {
-  const { error } = await supabase
-    .from('conductores')
-    .upsert(
-      { telefono, nombre, patente, modelo_auto: modeloAuto, color_auto: colorAuto },
-      { onConflict: 'telefono' }
-    );
-  return error;
-}
+
 
 // Busca un conductor real para asignarle un viaje: preferimos uno marcado
 // disponible = true; si no hay ninguno asi (o la columna esta vacia en
@@ -564,96 +521,45 @@ function datosConductorParaViaje(conductor, nombreFallback) {
 }
 
 btnGuardarConductor.addEventListener('click', async () => {
+  if (btnGuardarConductor.disabled) return;
   const nombre = conductorNombre.value.trim();
-  const esAdminConductor = nombre.toLowerCase() === 'admin'
-    && conductorTelefono.value.trim().toLowerCase() === 'admin';
-  const telefonoRaw = esAdminConductor
-    ? TELEFONO_ADMIN
-    : conductorTelefono.value.replace(/\D/g, '');
+  const telefonoRaw = conductorTelefono.value.replace(/\D/g, '');
   const patente = conductorPatente.value.trim().toUpperCase();
   const modeloAuto = conductorModelo.value.trim();
   const colorAuto = colorAutoSeleccionado;
-
-  if (!nombre) {
-    conductorMsg.textContent = 'Ingresá tu nombre y apellido';
+  const errorValidacion = !nombre ? 'Ingresá tu nombre y apellido'
+    : telefonoRaw.length < 8 ? 'WhatsApp inválido (mín. 8 dígitos)'
+    : !patente ? 'Ingresá la patente'
+    : !modeloAuto ? 'Ingresá el modelo del auto'
+    : !colorAuto ? 'Elegí el color del auto' : null;
+  if (errorValidacion) {
+    conductorMsg.textContent = errorValidacion;
     conductorMsg.style.color = '#C0392B';
     return;
   }
-  if (!esAdminConductor && (!telefonoRaw || telefonoRaw.length < 8)) {
-    conductorMsg.textContent = 'WhatsApp inválido (mín. 8 dígitos)';
-    conductorMsg.style.color = '#C0392B';
-    return;
-  }
-  if (!patente) {
-    conductorMsg.textContent = 'Ingresá la patente';
-    conductorMsg.style.color = '#C0392B';
-    return;
-  }
-  if (!modeloAuto) {
-    conductorMsg.textContent = 'Ingresá el modelo del auto';
-    conductorMsg.style.color = '#C0392B';
-    return;
-  }
-  if (!colorAuto) {
-    conductorMsg.textContent = 'Elegí el color del auto';
-    conductorMsg.style.color = '#C0392B';
-    return;
-  }
-
-  const telefono = formatearTelefonoConPrefijo(telefonoRaw);
-
   btnGuardarConductor.disabled = true;
-  btnGuardarConductor.textContent = 'Guardando...';
+  btnGuardarConductor.textContent = 'Enviando código...';
   conductorMsg.textContent = '';
   conductorMsg.style.color = '';
-
-  const error = await upsertConductor(nombre, telefono, patente, modeloAuto, colorAuto);
-
-  if (error) {
-    console.error('[Movi] Error guardando conductor:', error);
-    conductorMsg.textContent = 'Error al guardar. Intentá de nuevo.';
+  try {
+    const email = await driverAuth.requestCode(conductorEmail.value);
+    ultimoCodigoEnviadoEn = Date.now();
+    registroConductorPendiente = {
+      email,
+      perfil: { nombre, telefono: formatearTelefonoConPrefijo(telefonoRaw), patente,
+        modelo_auto: modeloAuto, color_auto: colorAuto },
+    };
+    conductorVerificarSub.textContent = `Te mandamos un código a ${email}. Revisá también la carpeta de spam.`;
+    conductorVerificarMsg.textContent = '';
+    conductorCodigoInput.value = '';
+    mostrarOverlay(conductorVerificarOverlay);
+  } catch (error) {
+    conductorMsg.textContent = error.message || 'No pudimos enviar el código. Revisá tu conexión.';
     conductorMsg.style.color = '#C0392B';
+  } finally {
     btnGuardarConductor.disabled = false;
     btnGuardarConductor.textContent = 'Ingresar';
-    return;
   }
-
-  // Persistir rol + teléfono
-  localStorage.setItem('rol', 'conductor');
-  localStorage.setItem('conductor_telefono', telefono);
-
-  // FASE BETA: verificacion por SMS desactivada para todos los
-  // conductores (Twilio trial no manda SMS a numeros no verificados).
-  // Para reactivarla mas adelante, restaurar el bloque original de git.
-  if (esAdminConductor) {
-    localStorage.setItem('es_admin', 'true');
-    actualizarVisibilidadDevBtn();
-  }
-  btnGuardarConductor.textContent = '¡Listo!';
-  mostrarOverlay(driverWaitingOverlay);
-  btnGuardarConductor.disabled = false;
-  btnGuardarConductor.textContent = 'Ingresar';
-  iniciarSupervisionViajeConductor(telefono);
-  return;
-
-  // Conductor real: antes de dejarlo entrar, verificamos que el
-  // telefono es suyo de verdad con un codigo por SMS.
-  telefonoConductorPendienteVerificar = telefono;
-  const envio = await enviarCodigoSMS(telefono);
-
-  btnGuardarConductor.disabled = false;
-  btnGuardarConductor.textContent = 'Ingresar';
-
-  if (!envio.ok) {
-    conductorMsg.textContent = envio.error;
-    conductorMsg.style.color = '#C0392B';
-    return;
-  }
-
-  conductorVerificarSub.textContent = `Te mandamos un código por SMS al ${telefono}`;
-  conductorVerificarMsg.textContent = '';
-  conductorCodigoInput.value = '';
-  mostrarOverlay(conductorVerificarOverlay);
 });
 
 // Referencias de la pantalla de verificacion de codigo
@@ -663,42 +569,53 @@ const conductorVerificarMsg = document.getElementById('conductor-verificar-msg')
 const btnVerificarCodigo = document.getElementById('btn-verificar-codigo');
 
 btnVerificarCodigo.addEventListener('click', async () => {
-  const codigo = conductorCodigoInput.value.trim();
-  if (!codigo) {
-    conductorVerificarMsg.textContent = 'Ingresá el código que te llegó';
-    conductorVerificarMsg.style.color = '#C0392B';
-    return;
-  }
-
+  if (!registroConductorPendiente || btnVerificarCodigo.disabled) return;
   btnVerificarCodigo.disabled = true;
   btnVerificarCodigo.textContent = 'Verificando...';
   conductorVerificarMsg.textContent = '';
-
-  const resultado = await verificarCodigoSMS(telefonoConductorPendienteVerificar, codigo);
-
-  btnVerificarCodigo.disabled = false;
-  btnVerificarCodigo.textContent = 'Verificar';
-
-  if (!resultado.ok) {
-    conductorVerificarMsg.textContent = resultado.error;
+  try {
+    const perfil = await driverAuth.verifyAndSave(
+      registroConductorPendiente.email, conductorCodigoInput.value.trim(), registroConductorPendiente.perfil,
+    );
+    rol = 'conductor';
+    localStorage.setItem('rol', rol);
+    localStorage.setItem('conductor_telefono', perfil.telefono);
+    registroConductorPendiente = null;
+    mostrarOverlay(driverWaitingOverlay);
+    iniciarSupervisionViajeConductor(perfil.telefono);
+  } catch (error) {
+    conductorVerificarMsg.textContent = error.message || 'No pudimos verificar el código. Intentá de nuevo.';
     conductorVerificarMsg.style.color = '#C0392B';
-    return;
+  } finally {
+    btnVerificarCodigo.disabled = false;
+    btnVerificarCodigo.textContent = 'Verificar';
   }
-
-  mostrarOverlay(driverWaitingOverlay);
-  iniciarSupervisionViajeConductor(telefonoConductorPendienteVerificar);
 });
 
 document.getElementById('btn-reenviar-codigo')?.addEventListener('click', async () => {
-  if (!telefonoConductorPendienteVerificar) return;
-  conductorVerificarMsg.style.color = '';
-  conductorVerificarMsg.textContent = 'Reenviando...';
-  const envio = await enviarCodigoSMS(telefonoConductorPendienteVerificar);
-  conductorVerificarMsg.textContent = envio.ok ? 'Código reenviado.' : envio.error;
-  conductorVerificarMsg.style.color = envio.ok ? '#1F8A4C' : '#C0392B';
+  if (!registroConductorPendiente) return;
+  if (Date.now() - ultimoCodigoEnviadoEn < 60000) {
+    conductorVerificarMsg.textContent = 'Esperá un minuto antes de pedir otro código.';
+    return;
+  }
+  const boton = document.getElementById('btn-reenviar-codigo');
+  if (boton.disabled) return;
+  boton.disabled = true;
+  try {
+    await driverAuth.requestCode(registroConductorPendiente.email);
+    ultimoCodigoEnviadoEn = Date.now();
+    conductorVerificarMsg.textContent = 'Código reenviado. Revisá tu correo.';
+    conductorVerificarMsg.style.color = '#1F8A4C';
+  } catch (error) {
+    conductorVerificarMsg.textContent = error.message || 'No pudimos reenviar el código.';
+    conductorVerificarMsg.style.color = '#C0392B';
+  } finally {
+    boton.disabled = false;
+  }
 });
 
 document.getElementById('btn-atras-verificar')?.addEventListener('click', () => {
+  registroConductorPendiente = null;
   mostrarOverlay(conductorFormOverlay);
 });
 
@@ -706,7 +623,7 @@ const TELEFONO_ADMIN = '2920605208';
 
 // Evento del boton Continuar (pasajero)
 btnLoginContinuar.addEventListener('click', async () => {
-  const esAdmin = loginNombre.value.trim().toLowerCase() === 'admin'
+  const esAdmin = import.meta.env.DEV && loginNombre.value.trim().toLowerCase() === 'admin'
     && loginTelefono.value.trim().toLowerCase() === 'admin';
 
   let datos;
@@ -877,6 +794,8 @@ const driverActiveInfo = document.getElementById('driver-active-info');
 const btnConductorLlegue = document.getElementById('btn-conductor-llegue');
 const btnConductorIniciar = document.getElementById('btn-conductor-iniciar');
 const btnConductorFinalizar = document.getElementById('btn-conductor-finalizar');
+const btnConductorCancelar = document.getElementById('btn-conductor-cancelar');
+let aceptandoViajeConductor = false;
 
 // Cierra la sesion actual (pasajero o conductor) y vuelve a la
 // seleccion de rol. Reusada tanto desde el drawer ("Cerrar sesion")
@@ -884,7 +803,26 @@ const btnConductorFinalizar = document.getElementById('btn-conductor-finalizar')
 // (necesario porque esa pantalla es de pantalla completa y tapa el
 // menu/topbar, asi que sin este boton no habia forma de volver atras
 // si uno entraba a modo conductor por error o quiere cambiar de rol).
-function cerrarSesion() {
+async function cerrarSesion() {
+  if (conductorViajeActivo) {
+    mostrarToast('Terminá o cancelá la recogida antes de cerrar sesión.', '⚠️');
+    return;
+  }
+  if (conductorTelefonoActual) {
+    const { data, error } = await supabase.from('conductores')
+      .update({ disponible: false }).eq('telefono', conductorTelefonoActual)
+      .select('telefono').maybeSingle();
+    if (error || !data) {
+      mostrarToast('No pudimos desconectarte. Revisá tu conexión e intentá de nuevo.', '⚠️');
+      return;
+    }
+  }
+  const { error: authError } = await supabase.auth.signOut({ scope: 'local' });
+  if (authError) {
+    mostrarToast('No pudimos cerrar la sesión. Intentá nuevamente.', '⚠️');
+    return;
+  }
+  rol = null;
   localStorage.removeItem(LS_KEY);
   localStorage.removeItem('rol');
   localStorage.removeItem('conductor_telefono');
@@ -1030,70 +968,92 @@ function detenerListaPendientes() {
 
 // ---- Toggle "Disponible para viajes" ----
 toggleDisponible.addEventListener('click', async () => {
-  if (!conductorTelefonoActual) return;
-
-  conductorDisponible = !conductorDisponible;
-  actualizarToggleUI();
-
-  const { error } = await supabase
-    .from('conductores')
-    .update({ disponible: conductorDisponible })
-    .eq('telefono', conductorTelefonoActual);
-
-  if (error) {
+  if (!conductorTelefonoActual || toggleDisponible.disabled) return;
+  toggleDisponible.disabled = true;
+  const siguienteDisponibilidad = !conductorDisponible;
+  try {
+    const { data, error } = await supabase
+      .from('conductores')
+      .update({ disponible: siguienteDisponibilidad })
+      .eq('telefono', conductorTelefonoActual)
+      .select('disponible')
+      .maybeSingle();
+    if (error || !data) throw error || new Error('Disponibilidad no guardada');
+    conductorDisponible = data.disponible;
+    actualizarToggleUI();
+    if (conductorDisponible) {
+      iniciarListaPendientes();
+    } else {
+      detenerListaPendientes();
+      driverPendingList.innerHTML = '';
+    }
+  } catch (error) {
     console.error('[Movi] Error actualizando disponibilidad:', error);
-  }
-
-  if (conductorDisponible) {
-    iniciarListaPendientes();
-  } else {
-    detenerListaPendientes();
-    driverPendingList.innerHTML = '';
+    mostrarToast('No pudimos cambiar tu disponibilidad. Revisá tu conexión e intentá de nuevo.', '⚠️');
+  } finally {
+    toggleDisponible.disabled = false;
   }
 });
 
 // ---- FASE 3: aceptar un viaje (con proteccion contra doble asignacion) ----
 async function aceptarViaje(viajeId, btnEl) {
+  if (conductorViajeActivo || aceptandoViajeConductor || btnEl.disabled) return;
+  aceptandoViajeConductor = true;
   btnEl.disabled = true;
   btnEl.textContent = 'Aceptando...';
 
-  const { data: conductorRow } = await supabase
-    .from('conductores')
-    .select('*')
-    .eq('telefono', conductorTelefonoActual)
-    .maybeSingle();
+  try {
 
-  const { data, error } = await supabase
-    .from('viajes')
-    .update({
-      estado: 'conductor_asignado',
-      conductor_telefono: conductorTelefonoActual,
-      nombre_conductor: conductorRow?.nombre || 'Conductor',
-      patente_conductor: conductorRow?.patente || null,
-      modelo_auto_conductor: conductorRow?.modelo_auto || null,
-      color_auto_conductor: conductorRow?.color_auto || null,
-      eta_minutos: 3,
-    })
-    .eq('id', viajeId)
-    .is('conductor_telefono', null) // <- evita que dos conductores tomen el mismo viaje a la vez
-    .select()
-    .single();
+    const { data: conductorRow, error: errorConductor } = await supabase
+      .from('conductores')
+      .select('*')
+      .eq('telefono', conductorTelefonoActual)
+      .maybeSingle();
+    if (errorConductor || !conductorRow) throw errorConductor || new Error('Perfil de conductor no disponible');
 
-  if (error || !data) {
-    // No afecto ninguna fila: alguien mas lo acepto primero.
-    btnEl.textContent = 'Ya fue tomado';
-    setTimeout(() => refrescarListaPendientes(), 800);
-    return;
+    const { data, error } = await supabase
+      .from('viajes')
+      .update({
+        estado: 'conductor_asignado',
+        conductor_telefono: conductorTelefonoActual,
+        nombre_conductor: conductorRow?.nombre || 'Conductor',
+        patente_conductor: conductorRow?.patente || null,
+        modelo_auto_conductor: conductorRow?.modelo_auto || null,
+        color_auto_conductor: conductorRow?.color_auto || null,
+        eta_minutos: 3,
+      })
+      .eq('id', viajeId)
+      .eq('estado', 'pendiente')
+      .is('conductor_telefono', null) // <- evita que dos conductores tomen el mismo viaje a la vez
+      .select()
+      .single();
+
+    if (error || !data) {
+      btnEl.textContent = 'No disponible';
+      mostrarToast('No pudimos aceptar el viaje. Puede haberse cancelado o tomado; revisá la conexión.', '⚠️');
+      setTimeout(() => refrescarListaPendientes(), 800);
+      return;
+    }
+
+    detenerListaPendientes();
+    conductorDisponible = false;
+    actualizarToggleUI();
+
+    await supabase.from('conductores').update({ disponible: false }).eq('telefono', conductorTelefonoActual);
+
+    // Aplicar la respuesta confirmada aunque el evento Realtime se demore.
+    evaluarViajeConductor(data, conductorTelefonoActual);
+
+    // evaluarViajeConductor (suscripcion ya activa desde iniciarSupervisionViajeConductor)
+    // va a detectar este viaje nuevo y disparar entrarAVistaViajeActiva() sola.
+  } catch (error) {
+    console.error('[Movi] Error aceptando viaje:', error);
+    btnEl.disabled = false;
+    btnEl.textContent = 'Aceptar';
+    mostrarToast('No pudimos aceptar el viaje. Revisá tu conexión.', '⚠️');
+  } finally {
+    aceptandoViajeConductor = false;
   }
-
-  detenerListaPendientes();
-  conductorDisponible = false;
-  actualizarToggleUI();
-
-  await supabase.from('conductores').update({ disponible: false }).eq('telefono', conductorTelefonoActual);
-
-  // evaluarViajeConductor (suscripcion ya activa desde iniciarSupervisionViajeConductor)
-  // va a detectar este viaje nuevo y disparar entrarAVistaViajeActiva() sola.
 }
 
 // ---- FASE 4: vista del conductor durante el viaje activo ----
@@ -1111,16 +1071,27 @@ async function entrarAVistaViajeActiva(viaje) {
   driverActiveSheet.style.display = 'block';
 
   const auto = [viaje.modelo_auto_conductor, viaje.color_auto_conductor].filter(Boolean).join(' · ');
+  const { data: paradas } = await supabase.from('paradas').select('direccion, orden')
+    .eq('viaje_id', viaje.id).order('orden', { ascending: true });
+  if (conductorViajeActivo?.id !== viaje.id) return;
+  viaje = conductorViajeActivo;
+  const destinoTexto = paradas?.map((p) => p.direccion || 'Parada').join(' → ') || viaje.destino_direccion || 'Sin especificar';
   driverActiveInfo.innerHTML = `
-    <strong>Origen:</strong> ${viaje.origen_direccion || 'sin especificar'}<br>
-    ${auto ? `<strong>Tu auto:</strong> ${auto}<br>` : ''}
+    <strong>Origen:</strong> ${escaparHTML(viaje.origen_direccion || 'sin especificar')}<br>
+    <strong>Destino:</strong> ${escaparHTML(destinoTexto)}<br>
+    ${auto ? `<strong>Tu auto:</strong> ${escaparHTML(auto)}<br>` : ''}
     <strong>Precio:</strong> ${viaje.precio ? `$ ${Number(viaje.precio).toLocaleString('es-AR')}` : '—'}
   `;
+  const tieneContacto = Boolean(telefonoParaContacto(viaje.telefono_pasajero));
+  document.getElementById('btn-conductor-llamar').disabled = !tieneContacto;
+  document.getElementById('btn-conductor-whatsapp').disabled = !tieneContacto;
 
   actualizarBotonesViajeActivo(viaje.estado);
 
-  // Ruta desde la posicion actual del conductor hasta el origen del pasajero.
-  if (viaje.origen_lat != null && viaje.origen_lng != null) {
+  // Al recuperar un viaje, dibujar el tramo correspondiente a su estado.
+  if (viaje.estado === 'en_viaje') {
+    await dibujarRutaConductorViajeCompleto(viaje);
+  } else if (viaje.origen_lat != null && viaje.origen_lng != null) {
     await dibujarRutaConductorHaciaOrigen(viaje);
   }
 }
@@ -1129,6 +1100,7 @@ function actualizarBotonesViajeActivo(estado) {
   btnConductorLlegue.style.display = estado === 'conductor_asignado' ? 'block' : 'none';
   btnConductorIniciar.style.display = estado === 'llegó' ? 'block' : 'none';
   btnConductorFinalizar.style.display = estado === 'en_viaje' ? 'block' : 'none';
+  btnConductorCancelar.style.display = ['conductor_asignado', 'llegó'].includes(estado) ? 'block' : 'none';
 
   driverActiveTitulo.textContent =
     estado === 'conductor_asignado' ? 'Yendo a buscar al pasajero'
@@ -1171,11 +1143,24 @@ function aplicarEstiloRuta(tipo) {
 
 async function dibujarRutaConductorHaciaOrigen(viaje) {
   const posActual = await obtenerPosicionActualConductor();
-  if (!posActual) return;
+  if (!posActual) {
+    mostrarToast('Necesitamos tu ubicación para guiarte al pasajero. Activá el GPS y el permiso de ubicación.', '⚠️');
+    return;
+  }
 
   const destino = { lat: viaje.origen_lat, lng: viaje.origen_lng };
   const ruta = await getRuta([posActual, destino]);
-  if (!ruta || !map.getSource('ruta')) return;
+  if (conductorViajeActivo?.id !== viaje.id || conductorViajeActivo.estado === 'en_viaje') return;
+  if (!ruta) {
+    mostrarToast('No pudimos calcular el camino al pasajero. Intentá nuevamente.', '⚠️');
+    return;
+  }
+  if (!map.getSource('ruta')) {
+    map.once('load', () => {
+      if (conductorViajeActivo?.id === viaje.id) entrarAVistaViajeActiva(conductorViajeActivo);
+    });
+    return;
+  }
 
   // FIX: antes el ETA quedaba fijo en el "3" de aceptarViaje para
   // siempre. Ahora que ya calculamos la ruta real hacia el origen,
@@ -1200,10 +1185,23 @@ async function dibujarRutaConductorViajeCompleto(viaje) {
 
   if (!paradasViaje || paradasViaje.length === 0) return;
 
-  const origen = { lat: viaje.origen_lat, lng: viaje.origen_lng };
+  const origen = posicionAnteriorConductor || await obtenerPosicionActualConductor()
+    || { lat: viaje.origen_lat, lng: viaje.origen_lng };
   const puntos = [origen, ...paradasViaje.map((p) => ({ lat: p.lat, lng: p.lng }))];
   const ruta = await getRuta(puntos);
-  if (!ruta || !map.getSource('ruta')) return;
+  if (conductorViajeActivo?.id !== viaje.id || conductorViajeActivo.estado !== 'en_viaje') return;
+  if (!ruta) {
+    mostrarToast('No pudimos calcular la ruta del viaje. Revisá tu conexión.', '⚠️');
+    return;
+  }
+  if (!map.getSource('ruta')) {
+    map.once('load', () => {
+      if (conductorViajeActivo?.id === viaje.id && conductorViajeActivo.estado === 'en_viaje') {
+        dibujarRutaConductorViajeCompleto(conductorViajeActivo);
+      }
+    });
+    return;
+  }
 
   aplicarEstiloRuta('viaje');
   map.getSource('ruta').setData({ type: 'Feature', properties: {}, geometry: ruta.geometry });
@@ -1214,38 +1212,36 @@ async function dibujarRutaConductorViajeCompleto(viaje) {
   enfocarCamaraConductor(posicionActual, posicionActual.heading);
 }
 
-btnConductorLlegue.addEventListener('click', async () => {
-  if (!conductorViajeActivo) return;
-  btnConductorLlegue.disabled = true;
-  const { error } = await supabase
-    .from('viajes')
-    .update({ estado: 'llegó' })
-    .eq('id', conductorViajeActivo.id);
-  btnConductorLlegue.disabled = false;
-  if (error) console.error('[Movi] Error marcando "llegué":', error);
-  // La actualizacion de UI la dispara evaluarViajeConductor via Realtime.
-});
+async function cambiarEstadoViajeConductor(boton, estadoAnterior, estadoNuevo) {
+  if (!conductorViajeActivo || boton.disabled || conductorViajeActivo.estado !== estadoAnterior) return;
+  boton.disabled = true;
+  const viajeId = conductorViajeActivo.id;
+  try {
+    const cambios = estadoNuevo === 'cancelado'
+      ? { estado: estadoNuevo, tarifa_cancelacion: 0 } : { estado: estadoNuevo };
+    const { data, error } = await supabase.from('viajes').update(cambios)
+      .eq('id', viajeId).eq('conductor_telefono', conductorTelefonoActual)
+      .eq('estado', estadoAnterior).select('*').single();
+    if (error || !data) throw error || new Error('Viaje actualizado por otra sesion');
+    evaluarViajeConductor(data, conductorTelefonoActual);
+  } catch (error) {
+    console.error('[Movi] Error cambiando el estado del viaje:', error);
+    mostrarToast('No pudimos confirmar el cambio. Revisá tu conexión y el estado del viaje.', '⚠️');
+  } finally {
+    boton.disabled = false;
+  }
+}
 
-btnConductorIniciar.addEventListener('click', async () => {
-  if (!conductorViajeActivo) return;
-  btnConductorIniciar.disabled = true;
-  const { error } = await supabase
-    .from('viajes')
-    .update({ estado: 'en_viaje' })
-    .eq('id', conductorViajeActivo.id);
-  btnConductorIniciar.disabled = false;
-  if (error) console.error('[Movi] Error iniciando viaje:', error);
-});
-
-btnConductorFinalizar.addEventListener('click', async () => {
-  if (!conductorViajeActivo) return;
-  btnConductorFinalizar.disabled = true;
-  const { error } = await supabase
-    .from('viajes')
-    .update({ estado: 'finalizado' })
-    .eq('id', conductorViajeActivo.id);
-  btnConductorFinalizar.disabled = false;
-  if (error) console.error('[Movi] Error finalizando viaje:', error);
+btnConductorLlegue.addEventListener('click', () => cambiarEstadoViajeConductor(btnConductorLlegue, 'conductor_asignado', 'llegó'));
+btnConductorIniciar.addEventListener('click', () => cambiarEstadoViajeConductor(btnConductorIniciar, 'llegó', 'en_viaje'));
+btnConductorFinalizar.addEventListener('click', () => cambiarEstadoViajeConductor(btnConductorFinalizar, 'en_viaje', 'finalizado'));
+btnConductorCancelar.addEventListener('click', async () => {
+  const viaje = conductorViajeActivo;
+  if (!viaje || !['conductor_asignado', 'llegó'].includes(viaje.estado)) return;
+  const confirmar = await mostrarConfirm('¿Cancelar la recogida? Se avisará al pasajero y no tendrá cargo.', 'Cancelar recogida', 'Volver');
+  if (confirmar && conductorViajeActivo?.id === viaje.id) {
+    await cambiarEstadoViajeConductor(btnConductorCancelar, viaje.estado, 'cancelado');
+  }
 });
 
 // ---- FASE 5: al terminar/cancelarse, volver a la lista de pendientes ----
@@ -1264,14 +1260,21 @@ async function salirDeVistaViajeActiva() {
   limpiarEstadoLocalViajeConductor();
   sheet.style.display = ''; // deja que la hoja de pasajero vuelva a su estado normal por si se cambia de rol
 
-  if (conductorTelefonoActual) {
-    await supabase.from('conductores').update({ disponible: true }).eq('telefono', conductorTelefonoActual);
+  conductorDisponible = false;
+  try {
+    const { data, error } = await supabase.from('conductores')
+      .update({ disponible: true }).eq('telefono', conductorTelefonoActual)
+      .select('disponible').maybeSingle();
+    if (error || !data) throw error || new Error('Disponibilidad no guardada');
+    conductorDisponible = data.disponible;
+  } catch (error) {
+    console.error('[Movi] Error recuperando disponibilidad:', error);
+    mostrarToast('Viaje cerrado. No pudimos reconectarte; tocá el botón de disponibilidad para reintentar.', '⚠️');
   }
-  conductorDisponible = true;
   actualizarToggleUI();
 
   mostrarOverlay(driverWaitingOverlay);
-  iniciarListaPendientes();
+  if (conductorDisponible) iniciarListaPendientes();
 }
 
 function evaluarViajeConductor(viaje, telefono) {
@@ -2514,6 +2517,13 @@ btnCentrarMapa.addEventListener('click', () => {
   void btnCentrarMapa.offsetWidth;
   btnCentrarMapa.classList.add('pulse');
 
+  if (rol === 'conductor') {
+    const posicionActual = posicionAnteriorConductor || posicionConductor;
+    if (posicionActual) enfocarCamaraConductor(posicionActual, posicionActual.heading);
+    else mostrarToast('Todavía no tenemos tu ubicación. Revisá el permiso de GPS.', '⚠️');
+    return;
+  }
+
   const estado = viajeActivoPasajero?.estado;
 
   if (estado === 'conductor_asignado' || estado === 'en_camino') {
@@ -2959,11 +2969,37 @@ document.getElementById('btn-cancelar-viaje').addEventListener('click', async ()
 });
 
 document.getElementById('btn-llamar').addEventListener('click', () => {
-  console.log('[Movi] Llamando al conductor (todavia sin conectar)');
+  contactarTelefono(viajeActivoPasajero?.conductor_telefono, false);
 });
 
 document.getElementById('btn-chatear').addEventListener('click', () => {
-  console.log('[Movi] Abriendo chat con el conductor (todavia sin conectar)');
+  contactarTelefono(viajeActivoPasajero?.conductor_telefono, true);
+});
+
+function escaparHTML(texto) {
+  const reemplazos = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+  return String(texto).replace(/[&<>"']/g, (caracter) => reemplazos[caracter]);
+}
+
+function telefonoParaContacto(telefono) {
+  const digitos = String(telefono || '').replace(/\D/g, '');
+  return digitos.length >= 8 && digitos.length <= 15 ? digitos : null;
+}
+
+function contactarTelefono(telefono, whatsapp) {
+  const numero = telefonoParaContacto(telefono);
+  if (!numero) {
+    mostrarToast('No hay un teléfono de contacto disponible para este viaje.', '⚠️');
+    return;
+  }
+  window.location.href = whatsapp ? `https://wa.me/${numero}` : `tel:+${numero}`;
+}
+
+document.getElementById('btn-conductor-llamar').addEventListener('click', () => {
+  contactarTelefono(conductorViajeActivo?.telefono_pasajero, false);
+});
+document.getElementById('btn-conductor-whatsapp').addEventListener('click', () => {
+  contactarTelefono(conductorViajeActivo?.telefono_pasajero, true);
 });
 
 // ==================================================================
@@ -3341,7 +3377,7 @@ const devPanelClose = document.getElementById('dev-panel-close');
 
 // El boton flotante de dev solo se muestra si el usuario logueado es admin
 function actualizarVisibilidadDevBtn() {
-  devFloatingBtn.style.display = localStorage.getItem('es_admin') === 'true' ? 'grid' : 'none';
+  devFloatingBtn.style.display = import.meta.env.DEV && localStorage.getItem('es_admin') === 'true' ? 'grid' : 'none';
 }
 actualizarVisibilidadDevBtn();
 
@@ -3698,7 +3734,7 @@ function devPuntoEnDistancia(coords, acumuladas, distancia) {
 //  callback de finalizacion que se le haya pasado.
 // ==================================================================
 function esAdmin() {
-  return localStorage.getItem('es_admin') === 'true';
+  return import.meta.env.DEV && localStorage.getItem('es_admin') === 'true';
 }
 
 let simAutoFrameId = null;
